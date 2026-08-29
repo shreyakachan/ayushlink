@@ -5,6 +5,7 @@ from schemas.doctor import (
     DoctorLoginRequest,
     DoctorAuthResponse,
     DoctorPatientCaseResponse,
+    DoctorMchCaseResponse,
 )
 from schemas.asha_worker import AshaWorkerResponse
 from schemas.medical_record import PatientMedicalRecordResponse
@@ -13,6 +14,8 @@ from services.doctor_service import (
     register_doctor,
     login_doctor,
     get_doctor_patient_cases,
+    get_doctor_submitted_patients,
+    get_doctor_mch_cases,
     get_patient_records_for_doctor,
     assign_patient_to_doctor,
     get_asha_workers_for_doctor,
@@ -55,12 +58,36 @@ async def login(credentials: DoctorLoginRequest):
     "/doctor/cases",
     response_model=List[DoctorPatientCaseResponse],
     summary="View assigned patient cases and consultation queue (Doctor only)",
-    description="Allows an authenticated Doctor to view patient cases assigned to them as well as active consultation queue cases with symptom summaries.",
+    description="Allows an authenticated Doctor to view real consultation queue cases with symptom summaries from MongoDB.",
 )
 async def view_assigned_cases(
     current_doctor: dict = Depends(get_current_doctor),
 ):
     return await get_doctor_patient_cases(current_doctor)
+
+
+@router.get(
+    "/doctor/patients",
+    response_model=List[DoctorPatientCaseResponse],
+    summary="View real patients who submitted symptoms (Doctor only)",
+    description="Returns only patients who have submitted symptoms through the Patient Portal, excluding accounts without symptoms.",
+)
+async def view_doctor_patients(
+    current_doctor: dict = Depends(get_current_doctor),
+):
+    return await get_doctor_submitted_patients(current_doctor)
+
+
+@router.get(
+    "/doctor/mch-cases",
+    response_model=List[DoctorMchCaseResponse],
+    summary="View real maternal and child health submissions (Doctor only)",
+    description="Returns real maternal, pregnancy, and pediatric symptom submissions from MongoDB.",
+)
+async def view_doctor_mch_cases(
+    current_doctor: dict = Depends(get_current_doctor),
+):
+    return await get_doctor_mch_cases(current_doctor)
 
 
 @router.get(
@@ -117,7 +144,16 @@ async def view_cases_alias(current_doctor: dict = Depends(get_current_doctor)):
     return await get_doctor_patient_cases(current_doctor)
 
 
+@router.get("/doctors/patients", response_model=List[DoctorPatientCaseResponse], include_in_schema=False)
+async def view_patients_alias(current_doctor: dict = Depends(get_current_doctor)):
+    return await get_doctor_submitted_patients(current_doctor)
+
+
+@router.get("/doctors/mch-cases", response_model=List[DoctorMchCaseResponse], include_in_schema=False)
+async def view_mch_cases_alias(current_doctor: dict = Depends(get_current_doctor)):
+    return await get_doctor_mch_cases(current_doctor)
+
+
 @router.get("/doctors/asha-workers", response_model=List[AshaWorkerResponse], include_in_schema=False)
 async def view_asha_workers_alias(current_doctor: dict = Depends(get_current_doctor)):
     return await get_asha_workers_for_doctor(current_doctor)
-

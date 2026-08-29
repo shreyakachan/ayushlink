@@ -18,6 +18,9 @@ class Consultation(MongoBaseModel):
     date_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Consultation scheduled/requested date and time")
     status: str = Field(default="requested", description="Status: requested | accepted | rejected | in_progress | completed | cancelled")
     notes: Optional[str] = Field(default=None, description="Doctor or clinical notes")
+    diagnosis: Optional[str] = Field(default=None, description="Clinical diagnosis")
+    advice: Optional[str] = Field(default=None, description="Medical and dietary advice, lifestyle instructions")
+    medicines: List[Dict[str, Any]] = Field(default_factory=list, description="Prescribed medicines list")
     reason: Optional[str] = Field(default=None, description="Reason for consultation, e.g. Viral fever follow-up")
     symptoms: List[str] = Field(default_factory=list, description="Associated symptoms")
     urgency: str = Field(default="routine", description="Urgency: routine | urgent | emergency")
@@ -30,3 +33,4 @@ class Consultation(MongoBaseModel):
         },
         description="Backend data structure to support teleconsultation / video-call sessions",
     )
+

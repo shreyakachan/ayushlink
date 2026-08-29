@@ -28,7 +28,7 @@ def doc_to_asha_response(doc: dict) -> AshaWorkerResponse:
     }
     return AshaWorkerResponse(
         id=str(doc.get("_id")),
-        worker_id=doc.get("worker_id", f"ASHA-{random.randint(100, 999)}"),
+        worker_id=doc.get("worker_id") or str(doc.get("_id")),
         full_name=doc.get("full_name", ""),
         phone=doc.get("phone", ""),
         email=doc.get("email"),

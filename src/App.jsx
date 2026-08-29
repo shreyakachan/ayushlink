@@ -29,6 +29,7 @@ import PatientLoginScreen from "./components/PatientLoginScreen.jsx"
 import PatientRegisterScreen from "./components/PatientRegisterScreen.jsx"
 import AshaRegisterScreen from "./components/AshaRegisterScreen.jsx"
 import DoctorRegisterScreen from "./components/DoctorRegisterScreen.jsx"
+import DoctorConsultationScreen from "./components/DoctorConsultationScreen.jsx"
 import MaternalChildHealthScreen from "./components/MaternalChildHealthScreen.jsx"
 
 export default function App() {
@@ -36,6 +37,7 @@ export default function App() {
   const [role, setRole] = useState(null)
   const [currentPatient, setCurrentPatient] = useState(() => getAuthUser())
   const [scannedPatient, setScannedPatient] = useState(null)
+  const [consultationPatient, setConsultationPatient] = useState(null)
 
   // Language for the patient-side screens only (persisted independently)
   const [patientLang, setPatientLangState] = useState(() => {
@@ -84,9 +86,22 @@ export default function App() {
   const handleSelect = (id) => {
     if (id === "register") setScreen("register")
     if (id === "abha-scan") setScreen("abha-scan")
-    if (id === "prescriptions") setScreen("prescriptions")
+    if (id === "prescriptions") {
+      if (role === "doctor") {
+        setScreen("patients")
+      } else {
+        setScreen("prescriptions")
+      }
+    }
     if (id === "ai") setScreen("ai")
     if (id === "patients") setScreen("patients")
+    if (id === "consultations" || id === "consultation") {
+      if (consultationPatient) {
+        setScreen("doctor-consultation")
+      } else {
+        setScreen("patients")
+      }
+    }
     if (id === "sync") setScreen("sync")
     if (id === "notifications" || id === "alerts") setScreen("notifications")
     if (id === "profile") setScreen("profile")
@@ -217,6 +232,10 @@ export default function App() {
       {screen === "doctor-home" && (
         <DoctorHomeScreen
           onSelect={handleSelect}
+          onStartConsultation={(p) => {
+            setConsultationPatient(p)
+            setScreen("doctor-consultation")
+          }}
           onBack={() => {
             clearAuthSession()
             setRole(null)
@@ -304,7 +323,18 @@ export default function App() {
         <PatientsScreen
           lang={ashaLang}
           onBack={goToRoleHome}
+          onOpenConsultation={(p) => {
+            setConsultationPatient(p)
+            setScreen("doctor-consultation")
+          }}
           onRegisterNew={() => setScreen("register")}
+        />
+      )}
+      {screen === "doctor-consultation" && (
+        <DoctorConsultationScreen
+          patient={consultationPatient}
+          onBack={goToRoleHome}
+          onConsultationComplete={() => {}}
         />
       )}
       {screen === "sync" && <PendingSyncScreen lang={ashaLang} onBack={goToRoleHome} />}

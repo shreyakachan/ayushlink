@@ -23,8 +23,38 @@ class MongoDB:
 db_instance = MongoDB()
 
 
+async def init_db_indexes():
+    """Ensure unique indexes exist on core identity fields for duplicate protection."""
+    if db_instance.db is None:
+        return
+    try:
+        # Doctors unique indexes
+        await db_instance.db[COLLECTION_DOCTORS].create_index("phone", unique=True, sparse=True)
+        await db_instance.db[COLLECTION_DOCTORS].create_index("doctor_id", unique=True, sparse=True)
+
+        # ASHA workers unique indexes
+        await db_instance.db[COLLECTION_ASHA_WORKERS].create_index("phone", unique=True, sparse=True)
+        await db_instance.db[COLLECTION_ASHA_WORKERS].create_index("worker_id", unique=True, sparse=True)
+
+        # Patients unique indexes
+        await db_instance.db[COLLECTION_PATIENTS].create_index("phone", unique=True, sparse=True)
+        await db_instance.db[COLLECTION_PATIENTS].create_index("patient_id", unique=True, sparse=True)
+
+        # Symptoms unique index
+        await db_instance.db[COLLECTION_SYMPTOMS].create_index("symptom_id", unique=True, sparse=True)
+
+        # Consultations unique index
+        await db_instance.db[COLLECTION_CONSULTATIONS].create_index("consultation_id", unique=True, sparse=True)
+
+        # Prescriptions unique index
+        await db_instance.db[COLLECTION_PRESCRIPTIONS].create_index("prescription_id", unique=True, sparse=True)
+        logger.info("MongoDB unique indexes verified successfully.")
+    except Exception as e:
+        logger.warning(f"Note on MongoDB index verification: {e}")
+
+
 async def connect_to_mongo():
-    """Initialize MongoDB async client and select database."""
+    """Initialize MongoDB async client, select database, and verify indexes."""
     try:
         logger.info(f"Connecting to MongoDB at {settings.MONGODB_URL}...")
         db_instance.client = AsyncIOMotorClient(
@@ -33,9 +63,12 @@ async def connect_to_mongo():
         )
         db_instance.db = db_instance.client[settings.MONGODB_DB_NAME]
         logger.info(f"Connected to MongoDB database: {settings.MONGODB_DB_NAME}")
+        # Verify and apply unique indexes (strictly zero automatic data seeding)
+        await init_db_indexes()
     except Exception as e:
         logger.error(f"Failed to connect to MongoDB: {e}")
         raise e
+
 
 
 async def close_mongo_connection():

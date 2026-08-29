@@ -15,7 +15,7 @@ def doc_to_patient_response(doc: dict) -> PatientResponse:
     """Helper to convert MongoDB document to clean PatientResponse."""
     return PatientResponse(
         id=str(doc.get("_id")),
-        patient_id=doc.get("patient_id", f"P-{random.randint(1000, 9999)}"),
+        patient_id=doc.get("patient_id") or str(doc.get("_id")),
         full_name=doc.get("full_name", ""),
         phone=doc.get("phone", ""),
         age=doc.get("age"),

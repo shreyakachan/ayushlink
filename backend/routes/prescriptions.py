@@ -14,6 +14,7 @@ from services.prescription_service import (
     get_patient_prescriptions,
     get_asha_patient_prescriptions,
     get_doctor_created_prescriptions,
+    get_patient_prescriptions_for_doctor,
 )
 
 router = APIRouter(tags=["Digital Prescriptions"])
@@ -47,6 +48,20 @@ async def doctor_get_my_prescriptions(
     current_doctor: dict = Depends(get_current_doctor),
 ):
     return await get_doctor_created_prescriptions(current_doctor)
+
+
+@router.get(
+    "/doctor/patients/{patient_id}/prescriptions",
+    response_model=List[PrescriptionResponse],
+    summary="View prescriptions for a specific patient (Doctor only)",
+    description="Retrieves all digital prescriptions issued for the specified patient.",
+)
+async def doctor_get_patient_prescriptions(
+    patient_id: str,
+    current_doctor: dict = Depends(get_current_doctor),
+):
+    return await get_patient_prescriptions_for_doctor(patient_id, current_doctor)
+
 
 
 # Generic alias for doctor create

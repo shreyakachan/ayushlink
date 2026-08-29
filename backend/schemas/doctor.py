@@ -71,16 +71,36 @@ class DoctorAuthResponse(BaseModel):
 
 
 class DoctorPatientCaseResponse(BaseModel):
-    """Schema representing an assigned patient case in the doctor's consultation queue."""
+    """Schema representing a real patient with submitted symptoms in the Doctor's queue / patient list."""
     patient_id: str
     full_name: str
     phone: str
     age: Optional[int] = None
     gender: Optional[str] = None
     village: Optional[str] = None
+    blood_group: Optional[str] = None
+    allergies: List[str] = []
+    chronic_conditions: List[str] = []
     abha_id: Optional[str] = None
     condition: Optional[str] = None
     status: str = "waiting"
     assigned_doctor_id: Optional[str] = None
     recent_symptoms: List[SymptomResponse] = []
     created_at: Optional[datetime] = None
+
+
+class DoctorMchCaseResponse(BaseModel):
+    """Schema representing a real patient with maternal / pregnancy / child health submissions."""
+    patient_id: str
+    full_name: str
+    village: str = "Chandapur"
+    age: Optional[int] = None
+    phone: str = ""
+    category: str = "pregnancy"  # pregnancy | vaccination | growth | risk
+    trimester: Optional[int] = None
+    symptoms: List[str] = []
+    description: str = ""
+    recorded_at: Optional[datetime] = None
+    severity: str = "moderate"
+    is_high_risk: bool = False
+    risk_reason: Optional[str] = None

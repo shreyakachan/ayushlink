@@ -1,11 +1,20 @@
 import { useMemo, useState, useEffect } from "react"
 import { ashaT } from "../lib/ashaI18n.js"
-import { getPatientsList, getPatientMedicalRecord, assignPatientToAsha, getAuthUser } from "../lib/api.js"
+import {
+  getPatientsList,
+  getDoctorPatients,
+  getPatientMedicalRecord,
+  assignPatientToAsha,
+  getAuthUser,
+  getAuthRole,
+} from "../lib/api.js"
 
 /**
- * AyushLink — My Patients
+ * AyushLink — Patients Screen
  * React + JavaScript + Tailwind CSS
- * Searchable/filterable patient list from live MongoDB records.
+ *
+ * For Doctor: Shows ONLY real patients who have submitted symptoms through the Patient Portal.
+ * For ASHA Worker: Shows village patient registry.
  */
 
 function formatDate(iso) {
@@ -64,13 +73,6 @@ function ChevronRightIcon({ className }) {
     </svg>
   )
 }
-function XIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M18 6 6 18M6 6l12 12" />
-    </svg>
-  )
-}
 function CalendarIcon({ className }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -80,8 +82,19 @@ function CalendarIcon({ className }) {
   )
 }
 
-export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
+function StethoscopeIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4.8 2.3A2 2 0 0 0 3 4v6a5 5 0 0 0 10 0V4" />
+      <path d="M8 15v1a6 6 0 0 0 12 0v-3" />
+      <circle cx="20" cy="10" r="2" />
+    </svg>
+  )
+}
+
+export default function PatientsScreen({ lang = "en", onBack, onRegisterNew, onOpenConsultation }) {
   const [patients, setPatients] = useState([])
+  const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState("all")
   const [selected, setSelected] = useState(null)
@@ -90,34 +103,54 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
   const [assigning, setAssigning] = useState(false)
   const [assignSuccess, setAssignSuccess] = useState(null)
   const t = ashaT(lang)
-  const authUser = getAuthUser()
+  const authRole = getAuthRole()
+  const isDoctor = authRole === "doctor"
 
   useEffect(() => {
     async function loadPatients() {
       try {
-        const livePatients = await getPatientsList()
+        setLoading(true)
+        // If Doctor: fetch strictly patients who submitted symptoms
+        // If ASHA: fetch village patients list
+        const livePatients = isDoctor ? await getDoctorPatients() : await getPatientsList()
         if (Array.isArray(livePatients)) {
-          const formatted = livePatients.map((p) => ({
-            id: p.patient_id || p.id,
-            name: p.full_name || p.name,
-            age: p.age || 30,
-            gender: p.gender ? p.gender.charAt(0).toUpperCase() + p.gender.slice(1) : "Female",
-            village: p.village || "Chandapur",
-            phone: p.phone ? `${p.phone.slice(0, 5)} ${p.phone.slice(5)}` : "—",
-            lastVisit: p.created_at ? new Date(p.created_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-            condition: p.condition || (p.chronic_conditions?.length ? p.chronic_conditions[0] : "General Checkup"),
-            status: p.status || "stable",
-            bloodGroup: p.blood_group || "—",
-            allergies: p.allergies || [],
-            chronicConditions: p.chronic_conditions || [],
-            ashaWorkerId: p.asha_worker_id,
-          }))
+          const formatted = livePatients.map((p) => {
+            const latestSymptom = p.recent_symptoms?.[0]
+            const reason = latestSymptom?.symptoms?.length
+              ? latestSymptom.symptoms.join(", ")
+              : latestSymptom?.description || p.condition || (p.chronic_conditions?.length ? p.chronic_conditions[0] : "General Consultation")
+            return {
+              id: p.patient_id || p.id,
+              name: p.full_name || p.name,
+              age: p.age || 30,
+              gender: p.gender ? p.gender.charAt(0).toUpperCase() + p.gender.slice(1) : "Female",
+              village: p.village || "Chandapur",
+              phone: p.phone ? `${p.phone.slice(0, 5)} ${p.phone.slice(5)}` : "—",
+              lastVisit: latestSymptom?.recorded_at
+                ? new Date(latestSymptom.recorded_at).toISOString().slice(0, 10)
+                : p.created_at
+                ? new Date(p.created_at).toISOString().slice(0, 10)
+                : new Date().toISOString().slice(0, 10),
+              condition: reason,
+              status: p.status || "waiting",
+              bloodGroup: p.blood_group || "—",
+              allergies: p.allergies || [],
+              chronicConditions: p.chronic_conditions || [],
+              ashaWorkerId: p.asha_worker_id,
+              recentSymptoms: p.recent_symptoms || [],
+            }
+          })
           setPatients(formatted)
         }
-      } catch {}
+      } catch (err) {
+        console.error("Error loading patients:", err)
+        setPatients([])
+      } finally {
+        setLoading(false)
+      }
     }
     loadPatients()
-  }, [])
+  }, [isDoctor])
 
   async function handleSelectPatient(p) {
     setSelected(p)
@@ -141,11 +174,9 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
       const res = await assignPatientToAsha(pId)
       if (res?.success) {
         setAssignSuccess(res.message || "Patient successfully assigned to ASHA Worker!")
-        // Update current details
         if (selectedDetails) {
           setSelectedDetails((d) => ({ ...d, asha_worker_id: res.asha_worker_id }))
         }
-        // Update patients list
         setPatients((prev) =>
           prev.map((pat) => (pat.id === pId ? { ...pat, ashaWorkerId: res.asha_worker_id } : pat))
         )
@@ -160,7 +191,9 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
   const statusMeta = {
     stable: { label: t.patients.stable, tone: "bg-emerald-50 text-emerald-700 border-emerald-200" },
     review: { label: t.patients.needsReview, tone: "bg-amber-50 text-amber-700 border-amber-200" },
+    waiting: { label: "Waiting", tone: "bg-blue-50 text-blue-700 border-blue-200" },
     critical: { label: t.patients.critical, tone: "bg-red-50 text-red-700 border-red-200" },
+    urgent: { label: "Urgent", tone: "bg-red-50 text-red-700 border-red-200" },
   }
 
   const filters = [
@@ -178,7 +211,8 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
         !q ||
         p.name.toLowerCase().includes(q) ||
         p.village.toLowerCase().includes(q) ||
-        p.id.toLowerCase().includes(q)
+        p.id.toLowerCase().includes(q) ||
+        p.condition.toLowerCase().includes(q)
       return matchesFilter && matchesQuery
     })
   }, [patients, query, filter])
@@ -192,14 +226,16 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
             type="button"
             onClick={onBack}
             aria-label={t.common.goBack}
-            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 active:scale-95"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 active:scale-95"
           >
             <BackIcon className="h-5 w-5" />
           </button>
           <div>
-            <h1 className="text-xl font-bold text-slate-800">{t.patients.title}</h1>
+            <h1 className="text-xl font-bold text-slate-800">
+              {isDoctor ? "Consultation Patients" : t.patients.title}
+            </h1>
             <p className="text-xs text-slate-500">
-              {patients.length} {t.patients.registeredTotal}
+              {patients.length} {isDoctor ? "patients with submitted symptoms" : t.patients.registeredTotal}
             </p>
           </div>
         </header>
@@ -215,23 +251,24 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t.patients.searchPlaceholder}
               aria-label={t.patients.searchPlaceholder}
-              className="w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-11 pr-4 text-sm text-slate-800 placeholder:text-slate-400 focus:border-sky-500 focus:outline-none focus:ring-4 focus:ring-sky-100"
+              className="w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-11 pr-4 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-100"
             />
           </div>
 
           {/* Filter pills */}
-          <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Filters">
+          <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Patient status filters">
             {filters.map((f) => (
               <button
                 key={f.id}
                 type="button"
+                role="tab"
+                aria-selected={filter === f.id}
                 onClick={() => setFilter(f.id)}
-                className={`shrink-0 rounded-full border px-4 py-2 text-sm font-medium transition
-                  ${
-                    filter === f.id
-                      ? "border-sky-600 bg-sky-600 text-white shadow-sm shadow-sky-600/25"
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
+                className={`shrink-0 rounded-full border px-4 py-1.5 text-xs font-semibold transition ${
+                  filter === f.id
+                    ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                }`}
               >
                 {f.label}
               </button>
@@ -239,18 +276,25 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
           </div>
 
           {/* Patient list */}
-          {filtered.length ? (
+          {loading ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl border border-slate-100 bg-white p-12 text-center shadow-sm">
+              <span className="flex h-10 w-10 animate-spin items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                <UsersIcon className="h-5 w-5" />
+              </span>
+              <p className="text-sm font-semibold text-slate-700">Loading patients…</p>
+            </div>
+          ) : filtered.length > 0 ? (
             <ul className="flex flex-col gap-3">
               {filtered.map((p) => {
-                const status = statusMeta[p.status] || statusMeta.stable
+                const meta = statusMeta[p.status] || statusMeta.waiting || statusMeta.stable
                 return (
                   <li key={p.id}>
                     <button
                       type="button"
                       onClick={() => handleSelectPatient(p)}
-                      className="group flex w-full items-center gap-4 rounded-3xl border border-slate-100 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-lg active:scale-[0.99]"
+                      className="group flex w-full items-center gap-3.5 rounded-3xl border border-slate-100 bg-white p-4 text-left shadow-sm transition hover:border-blue-200 hover:shadow-md active:scale-[0.99]"
                     >
-                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sm font-bold text-sky-700">
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-base font-bold text-blue-600 border border-blue-100">
                         {p.name
                           .split(" ")
                           .map((n) => n[0])
@@ -258,41 +302,65 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
                           .join("")}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <span className="truncate text-base font-semibold text-slate-800">{p.name}</span>
-                          <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${status.tone}`}>
-                            {status.label}
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="truncate text-base font-bold text-slate-800">{p.name}</span>
+                          <span className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${meta.tone}`}>
+                            {meta.label}
                           </span>
                         </span>
-                        <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-                          <span>{p.age}{t.patients.ageYears} &middot; {t.register.genders[p.gender] || p.gender}</span>
-                          <span className="flex items-center gap-1">
+                        <span className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                          <span>{p.id}</span>
+                          <span>&middot;</span>
+                          <span>
+                            {p.age} yrs, {p.gender}
+                          </span>
+                          <span>&middot;</span>
+                          <span className="inline-flex items-center gap-1">
                             <MapPinIcon className="h-3.5 w-3.5" />
                             {p.village}
                           </span>
                         </span>
-                        <span className="mt-1 block truncate text-sm text-slate-500">{p.condition}</span>
+                        <span className="mt-1.5 block truncate text-xs font-medium text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
+                          {p.condition}
+                        </span>
                       </span>
-                      <ChevronRightIcon className="h-5 w-5 shrink-0 text-slate-300 transition-transform group-hover:translate-x-1 group-hover:text-sky-500" />
+                      <ChevronRightIcon className="h-5 w-5 shrink-0 text-slate-300 transition-transform group-hover:translate-x-1 group-hover:text-blue-500" />
                     </button>
                   </li>
                 )
               })}
             </ul>
           ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-3xl border border-dashed border-slate-200 bg-white/60 py-16 text-center">
-              <UsersIcon className="h-8 w-8 text-slate-300" />
-              <p className="text-sm font-medium text-slate-500">{t.patients.noMatch}</p>
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-slate-200 bg-white/70 py-16 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                <UsersIcon className="h-6 w-6" />
+              </span>
+              <p className="text-sm font-bold text-slate-700">
+                {query || filter !== "all"
+                  ? t.patients.noMatch
+                  : isDoctor
+                  ? "No patients have submitted symptoms yet."
+                  : t.patients.noMatch}
+              </p>
+              <p className="text-xs text-slate-500 max-w-xs">
+                {query || filter !== "all"
+                  ? "Try adjusting your search query or filters."
+                  : isDoctor
+                  ? "Patients will appear here once they submit health complaints through the Patient Portal."
+                  : "No registered patients in this village."}
+              </p>
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={onRegisterNew}
-            className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-sky-600 px-6 py-4 text-base font-semibold text-white shadow-lg shadow-sky-600/25 transition hover:bg-sky-700 active:scale-[0.99]"
-          >
-            {t.patients.registerNew}
-          </button>
+          {!isDoctor && onRegisterNew && (
+            <button
+              type="button"
+              onClick={onRegisterNew}
+              className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 py-4 text-base font-semibold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 active:scale-[0.99]"
+            >
+              {t.patients.registerNew}
+            </button>
+          )}
         </div>
       </div>
 
@@ -305,7 +373,7 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-50 text-base font-bold text-sky-700">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-base font-bold text-blue-700 border border-blue-100">
                   {selected.name
                     .split(" ")
                     .map((n) => n[0])
@@ -314,16 +382,15 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
                 </span>
                 <div>
                   <h2 className="text-lg font-bold text-slate-800">{selected.name}</h2>
-                  <p className="text-xs text-slate-500">{selected.id} &middot; {selected.age}{t.patients.ageYears}, {t.register.genders[selected.gender] || selected.gender}</p>
+                  <p className="text-xs text-slate-500">{selected.id} &middot; {selected.age} yrs, {selected.gender}</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setSelected(null)}
-                aria-label={t.common.close}
                 className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
               >
-                <XIcon className="h-5 w-5" />
+                ✕
               </button>
             </div>
 
@@ -342,50 +409,86 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
               </div>
 
               {/* Current primary condition */}
-              <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-3.5">
-                <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">{t.patients.condition}</p>
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-3.5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Chief Complaint & Symptoms</p>
                 <p className="mt-1 font-medium text-slate-800">
                   {selectedDetails?.condition || selectedDetails?.recent_symptoms?.[0]?.description || selected.condition}
                 </p>
               </div>
 
+              {/* Vitals Grid */}
+              <div className="grid grid-cols-2 gap-2.5 text-xs">
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <p className="text-slate-400 font-medium">Blood Group</p>
+                  <p className="text-sm font-bold text-slate-800 mt-0.5">
+                    {selectedDetails?.blood_group || selected.bloodGroup || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <p className="text-slate-400 font-medium">Allergies</p>
+                  <p className="text-sm font-semibold text-slate-700 mt-0.5">
+                    {selectedDetails?.allergies?.length ? selectedDetails.allergies.join(", ") : "None reported"}
+                  </p>
+                </div>
+              </div>
+
               {/* Patient -> ASHA Assignment Card */}
-              <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-3.5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Assigned ASHA Worker</p>
-                    <p className="mt-0.5 text-xs font-bold text-slate-800">
-                      {selectedDetails?.asha_worker_id || selected.ashaWorkerId ? (
-                        <span className="inline-flex items-center gap-1.5 text-emerald-700 font-mono">
-                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                          {selectedDetails?.asha_worker_id || selected.ashaWorkerId}
-                        </span>
-                      ) : (
-                        <span className="text-slate-500">Unassigned</span>
-                      )}
-                    </p>
+              {!isDoctor && (
+                <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-3.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Assigned ASHA Worker</p>
+                      <p className="mt-0.5 text-xs font-bold text-slate-800">
+                        {selectedDetails?.asha_worker_id || selected.ashaWorkerId ? (
+                          <span className="inline-flex items-center gap-1.5 text-emerald-700 font-mono">
+                            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            {selectedDetails?.asha_worker_id || selected.ashaWorkerId}
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">Unassigned</span>
+                        )}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAssign(selected.id)}
+                      disabled={assigning}
+                      className="rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 transition active:scale-95"
+                    >
+                      {assigning ? "Assigning..." : "Assign Patient"}
+                    </button>
                   </div>
+                  {assignSuccess && (
+                    <p className="mt-2 text-xs font-medium text-emerald-700 bg-emerald-50 rounded-lg p-2 border border-emerald-100">
+                      ✓ {assignSuccess}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Doctor Consultation CTA */}
+              {isDoctor && (
+                <div className="pt-2">
                   <button
                     type="button"
-                    onClick={() => handleAssign(selected.id)}
-                    disabled={assigning}
-                    className="rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 transition active:scale-95"
+                    onClick={() => {
+                      const p = selected
+                      setSelected(null)
+                      onOpenConsultation?.(p)
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-600/30 transition hover:bg-blue-700 active:scale-98"
                   >
-                    {assigning ? "Assigning..." : "Assign Patient"}
+                    <StethoscopeIcon className="h-4.5 w-4.5" />
+                    <span>Open Consultation</span>
                   </button>
                 </div>
-                {assignSuccess && (
-                  <p className="mt-2 text-xs font-medium text-emerald-700 bg-emerald-50 rounded-lg p-2 border border-emerald-100">
-                    ✓ {assignSuccess}
-                  </p>
-                )}
-              </div>
+              )}
 
               {/* Real Submitted Symptoms History from MongoDB */}
               <div className="mt-2">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Live Submitted Symptoms</p>
-                  <span className="text-[10px] text-sky-600 font-semibold bg-sky-50 px-2 py-0.5 rounded-full border border-sky-100">MongoDB</span>
+                  <span className="text-[10px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">MongoDB</span>
                 </div>
 
                 {detailsLoading ? (
@@ -399,7 +502,7 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
                             <span className="font-bold text-slate-800 text-sm">
                               {s.symptoms?.length ? s.symptoms.join(", ") : (s.description || "Reported Symptoms")}
                             </span>
-                            <span className="font-mono text-xs font-semibold text-sky-700 bg-sky-100/70 px-1.5 py-0.5 rounded">
+                            <span className="font-mono text-xs font-semibold text-blue-700 bg-blue-100/70 px-1.5 py-0.5 rounded">
                               {s.symptom_id}
                             </span>
                           </div>
@@ -418,42 +521,23 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew }) {
                         </div>
 
                         {s.description && (
-                          <div className="mt-2 rounded-xl bg-white p-2.5 border border-slate-100">
-                            <p className="text-[11px] font-semibold uppercase text-slate-400">Description</p>
-                            <p className="mt-0.5 text-xs text-slate-700 font-medium">{s.description}</p>
-                          </div>
+                          <p className="mt-1.5 text-xs text-slate-600 leading-relaxed bg-white p-2.5 rounded-xl border border-slate-100">
+                            {s.description}
+                          </p>
                         )}
 
-                        <div className="mt-2.5 grid grid-cols-2 gap-2 text-xs border-t border-slate-200/70 pt-2 text-slate-600">
-                          <div>
-                            <span className="font-semibold text-slate-400">Duration: </span>
-                            <span className="font-medium text-slate-800">{s.duration || "2-3 days"}</span>
-                          </div>
-                          <div>
-                            <span className="font-semibold text-slate-400">Submitted by: </span>
-                            <span className="font-medium text-slate-800 capitalize">{s.submitted_by || "patient"}</span>
-                          </div>
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-400">
+                          <span>Recorded: {formatDate(s.recorded_at)}</span>
+                          <span>Duration: {s.duration || "N/A"}</span>
                         </div>
-
-                        <p className="mt-2 text-[11px] text-slate-400">
-                          Recorded: {formatDate(s.recorded_at || s.created_at)}
-                        </p>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-400 rounded-xl bg-slate-50 p-3">No symptom records submitted yet.</p>
+                  <p className="text-xs text-slate-400 py-2">No symptoms recorded for this patient.</p>
                 )}
               </div>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setSelected(null)}
-              className="mt-5 w-full rounded-2xl bg-sky-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-sky-600/25 transition hover:bg-sky-700 active:scale-[0.99]"
-            >
-              {t.common.close}
-            </button>
           </div>
         </div>
       ) : null}

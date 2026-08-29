@@ -1,47 +1,87 @@
-import { useMemo, useState } from "react"
-import {
-  PREGNANCIES,
-  VACCINATIONS,
-  GROWTH_RECORDS,
-  NUTRITION_TONE,
-  getDueStatus,
-  getHighRiskAlerts,
-  getSummaryCounts,
-  formatDate,
-} from "../lib/mchData.js"
+import { useMemo, useState, useEffect } from "react"
 import { ashaT } from "../lib/ashaI18n.js"
+import { getDoctorMchCases } from "../lib/api.js"
 
 /**
- * AyushLink — Maternal & Child Health tracker
+ * AyushLink — Maternal & Child Health Hub
  * React + JavaScript + Tailwind CSS
  *
- * One simple hub (tabs, not separate screens) covering the four things ASHA
- * workers need day to day: pregnancy (ANC) tracking, child vaccination,
- * growth monitoring, and a combined high-risk alert feed.
+ * Shows real maternal, pregnancy, and child health cases submitted through the Patient Portal.
+ * If no maternal symptoms are currently submitted, displays a clean empty state.
  */
 
 const STATUS_TONE = {
   red: "bg-red-50 text-red-700 border-red-100",
   amber: "bg-amber-50 text-amber-700 border-amber-100",
   blue: "bg-blue-50 text-blue-700 border-blue-100",
+  emerald: "bg-emerald-50 text-emerald-700 border-emerald-100",
 }
 
-const AVATAR_TONE = "bg-rose-50 text-rose-600"
+const AVATAR_TONE = "bg-rose-50 text-rose-600 border border-rose-100"
+
+function formatDate(iso) {
+  if (!iso) return "Today"
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+}
 
 export default function MaternalChildHealthScreen({ lang = "en", onBack }) {
   const [activeTab, setActiveTab] = useState("pregnancy")
+  const [mchCases, setMchCases] = useState([])
+  const [loading, setLoading] = useState(true)
   const [remindedIds, setRemindedIds] = useState(() => new Set())
   const t = ashaT(lang)
 
+  useEffect(() => {
+    async function loadMchData() {
+      try {
+        setLoading(true)
+        const liveCases = await getDoctorMchCases()
+        if (Array.isArray(liveCases)) {
+          setMchCases(liveCases)
+        }
+      } catch (err) {
+        console.error("Failed to load MCH cases:", err)
+        setMchCases([])
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadMchData()
+  }, [])
+
   const tabs = [
-    { id: "pregnancy", label: t?.mch?.tabs?.pregnancy || "Pregnancy", Icon: PregnancyIcon },
+    { id: "pregnancy", label: t?.mch?.tabs?.pregnancy || "Pregnancy & ANC", Icon: PregnancyIcon },
     { id: "vaccination", label: t?.mch?.tabs?.vaccination || "Vaccination", Icon: SyringeIcon },
     { id: "growth", label: t?.mch?.tabs?.growth || "Growth", Icon: ScaleIcon },
     { id: "risk", label: t?.mch?.tabs?.risk || "High-Risk", Icon: AlertIcon },
   ]
 
-  const counts = useMemo(() => getSummaryCounts(), [])
-  const highRiskAlerts = useMemo(() => getHighRiskAlerts(), [])
+  const pregnancyCases = useMemo(
+    () => mchCases.filter((c) => c.category === "pregnancy" || (!c.category && c.trimester)),
+    [mchCases]
+  )
+  const vaccinationCases = useMemo(
+    () => mchCases.filter((c) => c.category === "vaccination"),
+    [mchCases]
+  )
+  const growthCases = useMemo(
+    () => mchCases.filter((c) => c.category === "growth"),
+    [mchCases]
+  )
+  const highRiskCases = useMemo(
+    () => mchCases.filter((c) => c.is_high_risk || c.category === "risk" || c.severity === "severe"),
+    [mchCases]
+  )
+
+  const counts = useMemo(() => {
+    return {
+      dueSoon: pregnancyCases.length,
+      missed: mchCases.filter((c) => c.severity === "moderate").length,
+      highRisk: highRiskCases.length,
+    }
+  }, [pregnancyCases, mchCases, highRiskCases])
 
   const sendReminder = (id) => {
     setRemindedIds((prev) => {
@@ -51,10 +91,9 @@ export default function MaternalChildHealthScreen({ lang = "en", onBack }) {
     })
   }
 
-  const dueSoonLabel = t?.mch?.summary?.dueSoon || t?.mch?.dueSoon || "Due soon"
-  const missedLabel = t?.mch?.summary?.missed || t?.mch?.missedVisits || "Missed visits"
+  const dueSoonLabel = t?.mch?.summary?.dueSoon || t?.mch?.dueSoon || "Active ANC"
+  const missedLabel = t?.mch?.summary?.missed || t?.mch?.missedVisits || "Under Review"
   const highRiskLabel = t?.mch?.summary?.highRisk || t?.mch?.highRiskCases || "High-risk cases"
-  const reminderBannerText = t?.mch?.reminderBanner || t?.mch?.autoReminderNote || "Automatic reminders sent 3 days before due date."
 
   return (
     <main className="min-h-dvh w-full bg-slate-50">
@@ -74,8 +113,12 @@ export default function MaternalChildHealthScreen({ lang = "en", onBack }) {
               <PregnancyIcon className="h-5 w-5 text-white" />
             </span>
             <div className="min-w-0">
-              <h1 className="truncate text-base font-bold leading-tight text-slate-800">{t?.mch?.title || "Maternal & Child Health"}</h1>
-              <p className="truncate text-xs text-slate-500">{t?.mch?.subtitle || "Pregnancy, vaccination & growth tracker"}</p>
+              <h1 className="truncate text-base font-bold leading-tight text-slate-800">
+                {t?.mch?.title || "Maternal & Child Health"}
+              </h1>
+              <p className="truncate text-xs text-slate-500">
+                {mchCases.length} patient{mchCases.length === 1 ? "" : "s"} with maternal submissions
+              </p>
             </div>
           </div>
         </header>
@@ -86,30 +129,44 @@ export default function MaternalChildHealthScreen({ lang = "en", onBack }) {
             <SummaryChip
               label={dueSoonLabel}
               value={counts.dueSoon}
-              tone="amber"
-              active={activeTab !== "risk"}
+              tone="rose"
+              active={activeTab === "pregnancy"}
               onClick={() => setActiveTab("pregnancy")}
             />
-            <SummaryChip label={missedLabel} value={counts.missed} tone="red" onClick={() => setActiveTab("pregnancy")} />
-            <SummaryChip label={highRiskLabel} value={counts.highRisk} tone="rose" onClick={() => setActiveTab("risk")} />
+            <SummaryChip
+              label={missedLabel}
+              value={counts.missed}
+              tone="amber"
+              active={activeTab !== "pregnancy" && activeTab !== "risk"}
+              onClick={() => setActiveTab("vaccination")}
+            />
+            <SummaryChip
+              label={highRiskLabel}
+              value={counts.highRisk}
+              tone="red"
+              active={activeTab === "risk"}
+              onClick={() => setActiveTab("risk")}
+            />
           </div>
 
-          {/* Auto-reminder note */}
+          {/* Banner Note */}
           <div className="flex items-center gap-3 rounded-2xl border border-rose-100 bg-rose-50/60 px-4 py-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-rose-600 shadow-sm">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-rose-600 shadow-sm border border-rose-100">
               <BellIcon className="h-4 w-4" />
             </span>
             <p className="text-xs text-rose-800">
-              {reminderBannerText}
+              Real-time maternal, ANC, and pediatric symptoms submitted via the Patient Portal.
             </p>
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          <div className="flex gap-2 overflow-x-auto pb-1" role="tablist">
             {tabs.map(({ id, label, Icon }) => (
               <button
                 key={id}
                 type="button"
+                role="tab"
+                aria-selected={activeTab === id}
                 onClick={() => setActiveTab(id)}
                 className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-semibold transition
                   ${
@@ -120,28 +177,68 @@ export default function MaternalChildHealthScreen({ lang = "en", onBack }) {
               >
                 <Icon className="h-4 w-4" />
                 {label}
-                {id === "risk" && highRiskAlerts.length ? (
+                {id === "risk" && highRiskCases.length > 0 ? (
                   <span
                     className={`flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold
                       ${activeTab === id ? "bg-white/20 text-white" : "bg-rose-100 text-rose-700"}`}
                   >
-                    {highRiskAlerts.length}
+                    {highRiskCases.length}
                   </span>
                 ) : null}
               </button>
             ))}
           </div>
 
-          {/* Tab content */}
-          {activeTab === "pregnancy" && (
-            <PregnancyList reminded={remindedIds} onRemind={sendReminder} t={t} />
-          )}
-          {activeTab === "vaccination" && (
-            <VaccinationList reminded={remindedIds} onRemind={sendReminder} t={t} />
-          )}
-          {activeTab === "growth" && <GrowthList reminded={remindedIds} onRemind={sendReminder} t={t} />}
-          {activeTab === "risk" && (
-            <HighRiskList alerts={highRiskAlerts} reminded={remindedIds} onRemind={sendReminder} t={t} />
+          {/* Tab Content */}
+          {loading ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl border border-slate-100 bg-white p-12 text-center shadow-sm">
+              <span className="flex h-10 w-10 animate-spin items-center justify-center rounded-2xl bg-rose-50 text-rose-600">
+                <PregnancyIcon className="h-5 w-5" />
+              </span>
+              <p className="text-sm font-semibold text-slate-700">Loading maternal care submissions…</p>
+            </div>
+          ) : mchCases.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-slate-200 bg-white/70 py-16 text-center">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 border border-rose-100">
+                <PregnancyIcon className="h-7 w-7" />
+              </span>
+              <p className="text-base font-bold text-slate-800">No maternal-care submissions yet.</p>
+              <p className="text-xs text-slate-500 max-w-sm">
+                Patients who submit pregnancy, ANC, or maternal symptoms via the Patient Portal will appear here.
+              </p>
+            </div>
+          ) : activeTab === "pregnancy" ? (
+            <MchCaseList
+              cases={pregnancyCases}
+              emptyMsg="No pregnancy or ANC submissions yet."
+              reminded={remindedIds}
+              onRemind={sendReminder}
+              t={t}
+            />
+          ) : activeTab === "vaccination" ? (
+            <MchCaseList
+              cases={vaccinationCases}
+              emptyMsg="No child vaccination submissions yet."
+              reminded={remindedIds}
+              onRemind={sendReminder}
+              t={t}
+            />
+          ) : activeTab === "growth" ? (
+            <MchCaseList
+              cases={growthCases}
+              emptyMsg="No child growth monitoring records yet."
+              reminded={remindedIds}
+              onRemind={sendReminder}
+              t={t}
+            />
+          ) : (
+            <MchCaseList
+              cases={highRiskCases}
+              emptyMsg="No high-risk maternal cases right now."
+              reminded={remindedIds}
+              onRemind={sendReminder}
+              t={t}
+            />
           )}
         </div>
       </div>
@@ -149,8 +246,7 @@ export default function MaternalChildHealthScreen({ lang = "en", onBack }) {
   )
 }
 
-/* --- Summary chip --- */
-
+/* --- Summary Chip --- */
 function SummaryChip({ label, value, tone, active, onClick }) {
   const toneClass =
     tone === "red"
@@ -165,7 +261,7 @@ function SummaryChip({ label, value, tone, active, onClick }) {
       type="button"
       onClick={onClick}
       className={`flex flex-col items-start gap-1 rounded-2xl border bg-white px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md
-        ${active ? "border-rose-200" : "border-slate-100"}`}
+        ${active ? "border-rose-300 ring-2 ring-rose-100" : "border-slate-100"}`}
     >
       <span className={`text-2xl font-bold leading-none ${toneClass}`}>{value}</span>
       <span className="text-[11px] font-medium text-slate-500">{label}</span>
@@ -173,218 +269,103 @@ function SummaryChip({ label, value, tone, active, onClick }) {
   )
 }
 
-/* --- Shared card + remind button --- */
-
-function RecordCard({ initials, title, subtitle, metaLine, dueDate, extraBadge, id, reminded, onRemind, t }) {
-  const status = getDueStatus(dueDate)
-  const isReminded = reminded.has(id)
-  const statusLabel = t?.mch?.dueStatus?.[status.key] || status.label
-  const remindNowText = t?.mch?.remindNow || t?.mch?.remindBtn || "Remind now"
-  const reminderSentText = t?.mch?.reminderSent || t?.mch?.remindedBtn || "Reminder sent"
-
-  return (
-    <div className="flex flex-col gap-3 rounded-3xl border border-slate-100 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold ${AVATAR_TONE}`}>
-          {initials}
+/* --- MCH Case List --- */
+function MchCaseList({ cases, emptyMsg, reminded, onRemind, t }) {
+  if (!cases || cases.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-slate-200 bg-white/60 py-16 text-center">
+        <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">
+          <CheckIcon className="h-6 w-6" />
         </span>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="truncate text-sm font-semibold text-slate-800">{title}</p>
-            {extraBadge}
-          </div>
-          <p className="truncate text-xs text-slate-500">{subtitle}</p>
-          <p className="mt-0.5 truncate text-xs font-medium text-slate-600">{metaLine}</p>
-        </div>
+        <p className="text-sm font-bold text-slate-700">{emptyMsg}</p>
+        <p className="text-xs text-slate-400">Submissions from Patient Portal will automatically appear here.</p>
       </div>
-      <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end">
-        <span className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold ${STATUS_TONE[status.tone]}`}>
-          {statusLabel} · {formatDate(dueDate)}
-        </span>
-        <button
-          type="button"
-          onClick={() => onRemind(id)}
-          disabled={isReminded}
-          className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition
-            ${
-              isReminded
-                ? "bg-emerald-50 text-emerald-600"
-                : "bg-rose-50 text-rose-700 hover:bg-rose-100 active:scale-95"
-            }`}
-        >
-          {isReminded ? (
-            <>
-              <CheckIcon className="h-3.5 w-3.5" /> {reminderSentText}
-            </>
-          ) : (
-            <>
-              <BellIcon className="h-3.5 w-3.5" /> {remindNowText}
-            </>
-          )}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function initialsOf(name) {
-  return name.split(" ").map((w) => w[0]).slice(0, 2).join("")
-}
-
-/* --- Pregnancy tab --- */
-
-function PregnancyList({ reminded, onRemind, t }) {
-  const agePrefix = t?.mch?.ageLabel || "Age"
-  const trimesterPrefix = t?.mch?.trimester || t?.mch?.trimesterLabel || "Trimester"
-  const eddPrefix = t?.mch?.edd || t?.mch?.eddLabel || "EDD"
-  const highRiskBadgeText = t?.mch?.highRiskAlert || t?.mch?.highRiskBadge || "High risk"
+    )
+  }
 
   return (
     <div className="flex flex-col gap-3">
-      {PREGNANCIES.map((p) => (
-        <RecordCard
-          key={p.id}
-          id={p.id}
-          initials={initialsOf(p.name)}
-          title={p.name}
-          subtitle={`${p.village} · ${agePrefix} ${p.age} · ${trimesterPrefix} ${p.trimester}`}
-          metaLine={`${p.nextVisitLabel} · ${eddPrefix} ${formatDate(p.edd)}`}
-          dueDate={p.nextVisitDue}
-          extraBadge={
-            p.highRisk ? (
-              <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700">
-                {highRiskBadgeText}
-              </span>
-            ) : null
-          }
-          reminded={reminded}
-          onRemind={onRemind}
-          t={t}
-        />
-      ))}
-    </div>
-  )
-}
-
-/* --- Vaccination tab --- */
-
-function VaccinationList({ reminded, onRemind, t }) {
-  const motherPrefix = t?.mch?.mother || t?.mch?.motherLabel || "Mother"
-  const monthsSuffix = t?.mch?.months || t?.mch?.monthsLabel || "mo"
-  const nextDosePrefix = t?.mch?.nextDose || t?.mch?.nextDoseLabel || "Next dose"
-  const missedDoseSuffix = t?.mch?.missedDose || t?.mch?.missedDoseLabel || "missed dose"
-
-  return (
-    <div className="flex flex-col gap-3">
-      {VACCINATIONS.map((v) => (
-        <RecordCard
-          key={v.id}
-          id={v.id}
-          initials={initialsOf(v.childName)}
-          title={v.childName}
-          subtitle={`${v.village} · ${motherPrefix}: ${v.motherName} · ${v.ageMonths} ${monthsSuffix}`}
-          metaLine={`${nextDosePrefix}: ${v.nextVaccine}`}
-          dueDate={v.dueDate}
-          extraBadge={
-            v.missedCount > 0 ? (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
-                {v.missedCount} {missedDoseSuffix}
-              </span>
-            ) : null
-          }
-          reminded={reminded}
-          onRemind={onRemind}
-          t={t}
-        />
-      ))}
-    </div>
-  )
-}
-
-/* --- Growth tab --- */
-
-function GrowthList({ reminded, onRemind, t }) {
-  const monthsSuffix = t?.mch?.months || t?.mch?.monthsLabel || "mo"
-
-  return (
-    <div className="flex flex-col gap-3">
-      {GROWTH_RECORDS.map((g) => {
-        const tone = NUTRITION_TONE[g.nutritionStatus] || "slate"
-        const nutritionLabel = t?.mch?.nutritionLevels?.[g.nutritionStatus] || g.nutritionStatus
+      {cases.map((c) => {
+        const isReminded = reminded.has(c.patient_id)
+        const initials = c.full_name
+          .split(" ")
+          .map((w) => w[0])
+          .slice(0, 2)
+          .join("")
         return (
-          <RecordCard
-            key={g.id}
-            id={g.id}
-            initials={initialsOf(g.childName)}
-            title={g.childName}
-            subtitle={`${g.village} · ${g.ageMonths} ${monthsSuffix}`}
-            metaLine={`${g.weightKg} kg · ${g.heightCm} cm`}
-            dueDate={g.nextCheckDue}
-            extraBadge={
-              <span
-                className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide
+          <div
+            key={c.patient_id}
+            className="flex flex-col gap-3 rounded-3xl border border-slate-100 bg-white p-4.5 shadow-sm sm:flex-row sm:items-center sm:justify-between transition hover:border-rose-200 hover:shadow-md"
+          >
+            <div className="flex min-w-0 items-start gap-3.5">
+              <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-sm font-bold ${AVATAR_TONE}`}>
+                {initials}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="truncate text-sm font-bold text-slate-800">{c.full_name}</p>
+                  <span className="font-mono text-xs font-semibold text-slate-400">({c.patient_id})</span>
+                  {c.is_high_risk && (
+                    <span className="rounded-md bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700">
+                      High Risk
+                    </span>
+                  )}
+                  {c.trimester && (
+                    <span className="rounded-md bg-rose-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 border border-rose-100">
+                      Trimester {c.trimester}
+                    </span>
+                  )}
+                </div>
+
+                <p className="mt-0.5 truncate text-xs text-slate-500">
+                  {c.village} {c.age ? `• ${c.age} yrs` : ""} {c.phone ? `• +91 ${c.phone}` : ""}
+                </p>
+
+                {/* Chief Complaint / Symptoms */}
+                <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-medium text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
+                    {c.symptoms?.length ? c.symptoms.join(", ") : (c.description || "Maternal consultation")}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end self-end sm:self-center">
+              <span className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                c.is_high_risk ? STATUS_TONE.red : STATUS_TONE.rose || STATUS_TONE.blue
+              }`}>
+                Submitted {formatDate(c.recorded_at)}
+              </span>
+              <button
+                type="button"
+                onClick={() => onRemind(c.patient_id)}
+                disabled={isReminded}
+                className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition
                   ${
-                    tone === "emerald"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : tone === "amber"
-                      ? "bg-amber-100 text-amber-700"
-                      : "bg-red-100 text-red-700"
+                    isReminded
+                      ? "bg-emerald-50 text-emerald-600"
+                      : "bg-rose-50 text-rose-700 hover:bg-rose-100 active:scale-95"
                   }`}
               >
-                {nutritionLabel}
-              </span>
-            }
-            reminded={reminded}
-            onRemind={onRemind}
-            t={t}
-          />
+                {isReminded ? (
+                  <>
+                    <CheckIcon className="h-3.5 w-3.5" /> Reminder Sent
+                  </>
+                ) : (
+                  <>
+                    <BellIcon className="h-3.5 w-3.5" /> Send Reminder
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         )
       })}
     </div>
   )
 }
 
-/* --- High-risk tab --- */
-
-function HighRiskList({ alerts, reminded, onRemind, t }) {
-  const noHighRiskText = t?.mch?.noHighRisk || t?.mch?.noAlerts || "No high-risk cases right now"
-
-  if (!alerts.length) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-slate-200 bg-white/60 py-16 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-500">
-          <CheckIcon className="h-7 w-7" />
-        </span>
-        <p className="text-sm font-medium text-slate-500">{noHighRiskText}</p>
-      </div>
-    )
-  }
-  return (
-    <div className="flex flex-col gap-3">
-      {alerts.map((a) => (
-        <RecordCard
-          key={a.id}
-          id={a.id}
-          initials={initialsOf(a.name)}
-          title={a.name}
-          subtitle={`${a.village} · ${a.category}`}
-          metaLine={a.reason}
-          dueDate={a.refDate}
-          extraBadge={
-            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700">
-              {a.category}
-            </span>
-          }
-          reminded={reminded}
-          onRemind={onRemind}
-          t={t}
-        />
-      ))}
-    </div>
-  )
-}
-
-/* --- Inline icons --- */
+/* --- Inline SVG Icons --- */
 
 function BackIcon({ className }) {
   return (

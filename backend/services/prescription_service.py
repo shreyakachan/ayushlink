@@ -36,7 +36,7 @@ def doc_to_prescription_response(doc: dict) -> PrescriptionResponse:
 
     return PrescriptionResponse(
         id=str(doc.get("_id")),
-        prescription_id=doc.get("prescription_id", f"RX-{random.randint(1000, 9999)}"),
+        prescription_id=doc.get("prescription_id") or str(doc.get("_id")),
         patient_id=doc.get("patient_id", ""),
         patient_name=doc.get("patient_name"),
         patient_village=doc.get("patient_village"),
@@ -188,3 +188,26 @@ async def get_doctor_created_prescriptions(current_doctor: dict) -> List[Prescri
     async for doc in cursor:
         results.append(doc_to_prescription_response(doc))
     return results
+
+
+async def get_patient_prescriptions_for_doctor(
+    patient_identifier: str,
+    current_doctor: dict,
+) -> List[PrescriptionResponse]:
+    """Retrieve all prescriptions for a specific patient for an authenticated doctor."""
+    patient_doc = await find_patient_by_id_or_pid(patient_identifier)
+    if not patient_doc:
+        return []
+
+    prescriptions_col = get_collection(COLLECTION_PRESCRIPTIONS)
+    if prescriptions_col is None:
+        return []
+
+    target_pid = patient_doc.get("patient_id") or str(patient_doc["_id"])
+    cursor = prescriptions_col.find({"patient_id": target_pid}).sort("date", -1)
+
+    results: List[PrescriptionResponse] = []
+    async for doc in cursor:
+        results.append(doc_to_prescription_response(doc))
+    return results
+

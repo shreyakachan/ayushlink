@@ -318,6 +318,22 @@ export async function getDoctorCases() {
   return await apiFetch("/doctor/cases")
 }
 
+export async function getDoctorPatients() {
+  try {
+    return await apiFetch("/doctor/patients")
+  } catch {
+    return await apiFetch("/doctor/cases")
+  }
+}
+
+export async function getDoctorMchCases() {
+  try {
+    return await apiFetch("/doctor/mch-cases")
+  } catch {
+    return []
+  }
+}
+
 export async function assignDoctorCase(patientId) {
   return await apiFetch(`/doctor/cases/${patientId}/assign`, {
     method: "POST",
@@ -329,6 +345,7 @@ export async function getAshaWorkersList() {
 }
 
 
+
 /* =========================================================================
    Digital Prescriptions API Methods
    ========================================================================= */
@@ -337,6 +354,9 @@ export async function getPatientPrescriptions(patientId = null) {
   const role = getAuthRole()
   if (role === "asha" && patientId) {
     return await apiFetch(`/asha/patients/${patientId}/prescriptions`)
+  }
+  if (role === "doctor" && patientId) {
+    return await apiFetch(`/doctor/patients/${patientId}/prescriptions`)
   }
   if (role === "doctor") {
     return await apiFetch("/doctor/prescriptions")
@@ -362,6 +382,17 @@ export async function requestConsultation(consultationData) {
   })
 }
 
+export async function submitDoctorConsultation(consultationData) {
+  return await apiFetch("/doctor/consultations", {
+    method: "POST",
+    body: consultationData,
+  })
+}
+
+export async function getPatientConsultations(patientId) {
+  return await apiFetch(`/doctor/patients/${patientId}/consultations`)
+}
+
 export async function decideConsultation(consultationId, action, notes = null) {
   return await apiFetch(`/consultations/${consultationId}/decision`, {
     method: "POST",
@@ -378,6 +409,28 @@ export async function updateConsultationStatus(consultationId, status, notes = n
 
 export async function getConsultationHistory() {
   return await apiFetch("/consultations/history")
+}
+
+export async function getPatientActiveVideoRequest() {
+  return await apiFetch("/consultations/active-request")
+}
+
+export async function getDoctorVideoRequests() {
+  return await apiFetch("/doctor/video-requests")
+}
+
+export async function endConsultationCall(consultationId) {
+  return await apiFetch(`/consultations/${consultationId}/end-call`, {
+    method: "POST",
+  })
+}
+
+export async function getAvailableDoctors() {
+  try {
+    return await apiFetch("/doctors")
+  } catch {
+    return []
+  }
 }
 
 /* =========================================================================

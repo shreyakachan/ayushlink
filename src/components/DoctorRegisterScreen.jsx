@@ -11,6 +11,14 @@ function BackIcon({ className }) {
   )
 }
 
+function PlusPulseIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 12h4l2 5 4-10 2 5h6" />
+    </svg>
+  )
+}
+
 function StethoscopeIcon({ className }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -27,7 +35,7 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
     mobile: "",
     password: "",
     specialization: "General Physician",
-    qualification: "MBBS",
+    qualification: "MBBS, MD",
     assignedFacility: "District Hospital",
     preferredLanguage: lang,
   })
@@ -66,7 +74,7 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
         phone: cleanPhone,
         password: form.password.trim(),
         specialization: form.specialization.trim(),
-        qualification: form.qualification.trim() || "MBBS",
+        qualification: form.qualification.trim() || "MBBS, MD",
         assigned_facility: form.assignedFacility.trim() || "District Hospital",
         preferred_language: form.preferredLanguage || "en",
         is_on_duty: true,
@@ -81,6 +89,7 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
 
   const specializations = [
     "General Physician",
+    "General Physician & AYUSH Consultant",
     "Pediatrics",
     "Obstetrics & Gynecology",
     "Cardiology",
@@ -90,11 +99,11 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
   ]
 
   return (
-    <main className="relative flex min-h-dvh w-full items-stretch justify-center overflow-hidden bg-gradient-to-b from-emerald-50 via-white to-teal-50 md:items-center md:p-6">
-      <div aria-hidden="true" className="pointer-events-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-emerald-200/40 blur-3xl" />
-      <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 -right-16 h-80 w-80 rounded-full bg-teal-200/40 blur-3xl" />
+    <main className="relative flex min-h-dvh w-full items-stretch justify-center overflow-hidden bg-gradient-to-b from-sky-50 via-white to-blue-50 md:items-center md:p-6">
+      <div aria-hidden="true" className="pointer-events-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-sky-200/40 blur-3xl" />
+      <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 -right-16 h-80 w-80 rounded-full bg-blue-200/40 blur-3xl" />
 
-      <section className="relative z-10 flex w-full flex-col px-6 py-8 md:max-w-md md:gap-6 md:rounded-3xl md:border md:border-emerald-100 md:bg-white/85 md:px-10 md:py-10 md:shadow-xl md:shadow-emerald-900/5 md:backdrop-blur">
+      <section className="relative z-10 flex w-full flex-col px-6 py-8 md:max-w-md md:gap-6 md:rounded-3xl md:border md:border-blue-100 md:bg-white/85 md:px-10 md:py-10 md:shadow-xl md:shadow-blue-900/5 md:backdrop-blur">
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -103,25 +112,30 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
                 type="button"
                 onClick={onBack}
                 aria-label="Back"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-emerald-200 hover:bg-slate-50 hover:text-emerald-600 active:scale-95"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-blue-200 hover:bg-slate-50 hover:text-blue-600 active:scale-95"
               >
                 <BackIcon className="h-5 w-5" />
               </button>
             )}
-            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-600 shadow-lg shadow-emerald-600/30">
-              <StethoscopeIcon className="h-6 w-6 text-white" />
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/30">
+              <PlusPulseIcon className="h-6 w-6 text-white" />
             </span>
-            <span className="text-xl font-bold tracking-tight text-slate-800">
-              Ayush<span className="text-emerald-600">Link</span>
-            </span>
+            <div>
+              <span className="text-xl font-bold tracking-tight text-slate-800">
+                Ayush<span className="text-blue-600">Link</span>
+              </span>
+              <span className="ml-1.5 rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                Doctor Portal
+              </span>
+            </div>
           </div>
         </div>
 
         {/* Heading */}
         <header className="mt-4">
-          <p className="text-sm font-semibold text-emerald-600">Doctor Portal</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-blue-600">Clinical Registration</p>
           <h1 className="mt-1 text-2xl font-bold leading-tight text-slate-800">Create Doctor Account</h1>
-          <p className="mt-1 text-sm text-slate-500">Register to consult patients and manage teleconsultations.</p>
+          <p className="mt-1 text-sm text-slate-500">Register to consult village patients and manage teleconsultations.</p>
         </header>
 
         {apiError && (
@@ -137,10 +151,10 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
             <input
               id="doc_fullName"
               type="text"
-              placeholder="Dr. Anjali Rao"
+              placeholder="Dr. Ramesh Gupta"
               value={form.fullName}
               onChange={(e) => update("fullName", e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-100"
             />
             {errors.fullName && <p className="text-xs text-red-600">{errors.fullName}</p>}
           </div>
@@ -159,7 +173,7 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
                 placeholder="98765 43210"
                 value={form.mobile}
                 onChange={(e) => update("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))}
-                className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-100"
               />
             </div>
             {errors.mobile && <p className="text-xs text-red-600">{errors.mobile}</p>}
@@ -174,7 +188,7 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
               placeholder="Minimum 4 characters"
               value={form.password}
               onChange={(e) => update("password", e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-100"
             />
             {errors.password && <p className="text-xs text-red-600">{errors.password}</p>}
           </div>
@@ -186,7 +200,7 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
               id="doc_specialization"
               value={form.specialization}
               onChange={(e) => update("specialization", e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-100"
             >
               {specializations.map((s) => (
                 <option key={s} value={s}>{s}</option>
@@ -204,7 +218,7 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
               placeholder="District Hospital, Chandapur PHC"
               value={form.assignedFacility}
               onChange={(e) => update("assignedFacility", e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-100"
             />
             {errors.assignedFacility && <p className="text-xs text-red-600">{errors.assignedFacility}</p>}
           </div>
@@ -213,7 +227,7 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-6 py-4 text-base font-semibold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 py-4 text-base font-semibold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-300 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             {loading ? "Creating Account..." : "Create Doctor Account"}
           </button>
@@ -224,7 +238,7 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
             <button
               type="button"
               onClick={onLoginClick || onBack}
-              className="font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
+              className="font-semibold text-blue-600 hover:text-blue-700 hover:underline"
             >
               Sign in
             </button>

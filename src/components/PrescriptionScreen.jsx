@@ -177,7 +177,7 @@ function Field({ label, htmlFor, required, children, full }) {
 export default function PrescriptionScreen({ lang = "en", onBack }) {
   const [role, setRole] = useState("doctor") // "doctor" | "patient"
   const [view, setView] = useState("list") // "list" | "form" | "detail"
-  const [prescriptions, setPrescriptions] = useState(SEED_PRESCRIPTIONS)
+  const [prescriptions, setPrescriptions] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [toast, setToast] = useState("")
@@ -190,7 +190,7 @@ export default function PrescriptionScreen({ lang = "en", onBack }) {
         if (Array.isArray(liveList) && liveList.length > 0) {
           const formatted = liveList.map((p) => ({
             id: p.prescription_id || p.id,
-            patientName: p.patient_name || "Patient",
+            patientName: p.patient_name || p.patient_id || "Patient",
             village: p.village || "Chandapur",
             date: p.date ? new Date(p.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
             doctorName: p.doctor_name || DOCTOR_NAME,
@@ -204,8 +204,7 @@ export default function PrescriptionScreen({ lang = "en", onBack }) {
             notes: p.advice || p.notes || "",
             status: "active",
           }))
-          const liveIds = new Set(formatted.map((p) => p.id))
-          setPrescriptions([...formatted, ...SEED_PRESCRIPTIONS.filter((p) => !liveIds.has(p.id))])
+          setPrescriptions(formatted)
         }
       } catch {}
     }
@@ -360,37 +359,51 @@ export default function PrescriptionScreen({ lang = "en", onBack }) {
                 {role === "doctor" ? t.prescriptions.issuedPrescriptions : t.prescriptions.yourPrescriptions}
               </h2>
 
-              <div className="flex flex-col gap-3">
-                {prescriptions.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => openDetail(p.id)}
-                    className="group flex items-center gap-4 rounded-3xl border border-slate-100 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 active:scale-[0.99]"
-                  >
-                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
-                      <RxIcon className="h-6 w-6" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className="truncate text-base font-semibold text-slate-800">{p.patientName}</span>
-                        <span
-                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                            p.status === "requested" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
-                          }`}
-                        >
-                          {p.status === "requested" ? t.prescriptions.requested : t.prescriptions.active}
+              {prescriptions.length > 0 ? (
+                <div className="flex flex-col gap-3">
+                  {prescriptions.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => openDetail(p.id)}
+                      className="group flex items-center gap-4 rounded-3xl border border-slate-100 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 active:scale-[0.99]"
+                    >
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                        <RxIcon className="h-6 w-6" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="truncate text-base font-semibold text-slate-800">{p.patientName}</span>
+                          <span
+                            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                              p.status === "requested" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
+                            }`}
+                          >
+                            {p.status === "requested" ? t.prescriptions.requested : t.prescriptions.active}
+                          </span>
+                        </span>
+                        <span className="mt-0.5 block truncate text-sm text-slate-500">{p.diagnosis}</span>
+                        <span className="mt-0.5 block text-xs text-slate-400">
+                          {p.id} · {formatDate(p.date)}
                         </span>
                       </span>
-                      <span className="mt-0.5 block truncate text-sm text-slate-500">{p.diagnosis}</span>
-                      <span className="mt-0.5 block text-xs text-slate-400">
-                        {p.id} · {formatDate(p.date)}
-                      </span>
-                    </span>
-                    <ChevronRightIcon className="h-5 w-5 shrink-0 text-slate-300 transition-transform group-hover:translate-x-1 group-hover:text-blue-500" />
-                  </button>
-                ))}
-              </div>
+                      <ChevronRightIcon className="h-5 w-5 shrink-0 text-slate-300 transition-transform group-hover:translate-x-1 group-hover:text-blue-500" />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-slate-200 bg-white/70 py-16 text-center">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                    <RxIcon className="h-6 w-6" />
+                  </span>
+                  <p className="text-sm font-bold text-slate-700">No prescriptions issued yet.</p>
+                  <p className="text-xs text-slate-500 max-w-xs">
+                    {role === "doctor"
+                      ? "Create a digital prescription using the button above or during a patient consultation."
+                      : "Prescriptions prescribed by your doctor will appear here."}
+                  </p>
+                </div>
+              )}
             </>
           )}
 

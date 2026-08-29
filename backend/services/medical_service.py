@@ -21,7 +21,7 @@ def doc_to_symptom_response(doc: dict) -> SymptomResponse:
     """Helper to convert MongoDB symptom document to SymptomResponse."""
     return SymptomResponse(
         id=str(doc.get("_id")),
-        symptom_id=doc.get("symptom_id", f"SYM-{random.randint(1000, 9999)}"),
+        symptom_id=doc.get("symptom_id") or str(doc.get("_id")),
         patient_id=doc.get("patient_id", ""),
         symptoms=doc.get("symptoms", []),
         description=doc.get("description", ""),
