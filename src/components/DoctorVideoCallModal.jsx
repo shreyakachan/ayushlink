@@ -89,9 +89,18 @@ export default function DoctorVideoCallModal({
         if (!localStream || !isMounted) return
 
         // Connect to WebSocket signaling server
-        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-        const apiHost = API_BASE_URL.replace(/^https?:\/\//, "").replace(/\/api\/?$/, "")
-        const wsUrl = `${wsProtocol}//${apiHost}/api/ws/teleconsultation/${sessionId}?token=${token}`
+        let wsHost = window.location.host
+        let wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+
+        if (API_BASE_URL && /^https?:\/\//i.test(API_BASE_URL)) {
+          try {
+            const urlObj = new URL(API_BASE_URL)
+            wsHost = urlObj.host
+            wsProtocol = urlObj.protocol === "https:" ? "wss:" : "ws:"
+          } catch {}
+        }
+
+        const wsUrl = `${wsProtocol}//${wsHost}/api/ws/teleconsultation/${sessionId}?token=${encodeURIComponent(token || "")}`
 
         const ws = new WebSocket(wsUrl)
         websocketRef.current = ws

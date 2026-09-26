@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
+from schemas.health import HealthResponse
 from routes import api_router
 from database import connect_to_mongo, close_mongo_connection, ping_database
 
@@ -68,6 +69,16 @@ async def root():
         "docs": "/docs",
         "health": f"{settings.API_V1_STR}/health",
     }
+
+
+@app.get("/health", response_model=HealthResponse, include_in_schema=False)
+async def health_root():
+    return {"status": "ok"}
+
+
+@app.get("/api/health", response_model=HealthResponse, include_in_schema=False)
+async def health_api_root():
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":

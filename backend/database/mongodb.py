@@ -12,6 +12,7 @@ COLLECTION_DOCTORS = "doctors"
 COLLECTION_SYMPTOMS = "symptoms"
 COLLECTION_PRESCRIPTIONS = "prescriptions"
 COLLECTION_CONSULTATIONS = "consultations"
+COLLECTION_NOTIFICATIONS = "notifications"
 COLLECTION_SYNC_LOGS = "sync_logs"
 
 
@@ -48,6 +49,10 @@ async def init_db_indexes():
 
         # Prescriptions unique index
         await db_instance.db[COLLECTION_PRESCRIPTIONS].create_index("prescription_id", unique=True, sparse=True)
+
+        # Notifications indexes
+        await db_instance.db[COLLECTION_NOTIFICATIONS].create_index("notification_id", unique=True, sparse=True)
+        await db_instance.db[COLLECTION_NOTIFICATIONS].create_index([("patient_id", 1), ("created_at", -1)])
         logger.info("MongoDB unique indexes verified successfully.")
     except Exception as e:
         logger.warning(f"Note on MongoDB index verification: {e}")

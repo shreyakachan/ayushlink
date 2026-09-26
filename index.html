@@ -11,6 +11,33 @@
     <meta name="apple-mobile-web-app-title" content="AyushLink" />
     <meta name="description" content="AyushLink — Healthcare that works even without the Internet." />
     <title>AyushLink</title>
+    <script>
+      // Immediate dev-mode cache & service worker unregistration
+      // Runs before module scripts load to prevent stale chunk caching or blank screens on refresh
+      (function () {
+        var isDev =
+          window.location.hostname === "localhost" ||
+          window.location.hostname === "127.0.0.1" ||
+          window.location.port === "5173" ||
+          window.location.port === "3000"
+        if (isDev) {
+          if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function (regs) {
+              for (var i = 0; i < regs.length; i++) {
+                regs[i].unregister()
+              }
+            }).catch(function () {})
+          }
+          if ("caches" in window) {
+            caches.keys().then(function (keys) {
+              for (var j = 0; j < keys.length; j++) {
+                caches.delete(keys[j])
+              }
+            }).catch(function () {})
+          }
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

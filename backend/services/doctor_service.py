@@ -476,3 +476,17 @@ async def get_asha_workers_for_doctor(current_doctor: dict) -> List[AshaWorkerRe
     async for doc in cursor:
         results.append(doc_to_asha_response(doc))
     return results
+
+
+async def get_available_doctors() -> List[DoctorResponse]:
+    """Retrieve list of available / active doctors from MongoDB for consultation."""
+    collection = get_collection(COLLECTION_DOCTORS)
+    if collection is None:
+        return []
+
+    cursor = collection.find({"is_on_duty": {"$ne": False}})
+    results: List[DoctorResponse] = []
+    async for doc in cursor:
+        results.append(doc_to_doctor_response(doc))
+    return results
+

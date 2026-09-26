@@ -34,6 +34,10 @@ def doc_to_prescription_response(doc: dict) -> PrescriptionResponse:
         for m in raw_medicines
     ]
 
+    advice_val = doc.get("advice") or doc.get("instructions")
+    instructions_val = doc.get("instructions") or doc.get("advice")
+    notes_val = doc.get("notes")
+
     return PrescriptionResponse(
         id=str(doc.get("_id")),
         prescription_id=doc.get("prescription_id") or str(doc.get("_id")),
@@ -44,7 +48,10 @@ def doc_to_prescription_response(doc: dict) -> PrescriptionResponse:
         doctor_name=doc.get("doctor_name"),
         diagnosis=doc.get("diagnosis"),
         medicines=medicines,
-        instructions=doc.get("instructions"),
+        instructions=instructions_val,
+        advice=advice_val,
+        notes=notes_val,
+        consultation_id=doc.get("consultation_id"),
         date=doc.get("date", datetime.now(timezone.utc)),
         status=doc.get("status", "active"),
         created_at=doc.get("created_at"),
@@ -82,6 +89,10 @@ async def create_prescription(
     target_pid = patient_doc.get("patient_id") or str(patient_doc["_id"])
     doctor_id = current_doctor.get("doctor_id", str(current_doctor.get("_id")))
 
+    advice_val = data.advice or data.instructions
+    instructions_val = data.instructions or data.advice
+    notes_val = data.notes
+
     rx_doc = {
         "prescription_id": prescription_id,
         "patient_id": target_pid,
@@ -91,7 +102,9 @@ async def create_prescription(
         "doctor_name": current_doctor.get("full_name"),
         "diagnosis": data.diagnosis or patient_doc.get("condition"),
         "medicines": [m.model_dump() for m in data.medicines],
-        "instructions": data.instructions,
+        "instructions": instructions_val,
+        "advice": advice_val,
+        "notes": notes_val,
         "date": now,
         "status": data.status or "active",
         "facility": current_doctor.get("assigned_facility"),
@@ -124,6 +137,19 @@ async def create_prescription(
                 "$set": {"assigned_doctor_id": doctor_id, "updated_at": now},
             },
         )
+
+    # Trigger in-app notification for patient
+    try:
+        from services.notification_service import create_prescription_notification
+        await create_prescription_notification(
+            patient_id=target_pid,
+            doctor_name=current_doctor.get("full_name"),
+            prescription_id=prescription_id,
+            consultation_id=None,
+            doctor_id=doctor_id,
+        )
+    except Exception as e:
+        pass
 
     return doc_to_prescription_response(rx_doc)
 

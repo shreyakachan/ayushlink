@@ -33,6 +33,7 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
   const remoteVideoRef = useRef(null)
   const webrtcManagerRef = useRef(null)
   const websocketRef = useRef(null)
+  const isEndedRef = useRef(false)
 
   const [callDuration, setCallDuration] = useState(0)
   const [isMuted, setIsMuted] = useState(false)
@@ -156,6 +157,7 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
 
   // 6. Join Video Consultation & WebRTC Signaling Lifecycle (Requested on explicit click)
   const handleJoinVideoConsultation = async () => {
+    isEndedRef.current = false
     setPermissionError(null)
     setStage("in_call")
     setConnectionState("connecting")
@@ -205,9 +207,18 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
       if (!localStream) return
 
       // Step B: Connect to WebSocket signaling server
-      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-      const apiHost = API_BASE_URL.replace(/^https?:\/\//, "").replace(/\/api\/?$/, "")
-      const wsUrl = `${wsProtocol}//${apiHost}/api/ws/teleconsultation/${sessionId}?token=${token}`
+      let wsHost = window.location.host
+      let wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+
+      if (API_BASE_URL && /^https?:\/\//i.test(API_BASE_URL)) {
+        try {
+          const urlObj = new URL(API_BASE_URL)
+          wsHost = urlObj.host
+          wsProtocol = urlObj.protocol === "https:" ? "wss:" : "ws:"
+        } catch {}
+      }
+
+      const wsUrl = `${wsProtocol}//${wsHost}/api/ws/teleconsultation/${sessionId}?token=${encodeURIComponent(token || "")}`
 
       const ws = new WebSocket(wsUrl)
       websocketRef.current = ws
@@ -245,6 +256,9 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
 
       ws.onclose = () => {
         console.log("[WebRTC WS] Socket closed")
+        if (!isEndedRef.current) {
+          handleHangup()
+        }
       }
     } catch (err) {
       console.error("Error joining video session:", err)
@@ -269,6 +283,9 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
 
   // 8. Hangup & End Call
   const handleHangup = async () => {
+    if (isEndedRef.current) return
+    isEndedRef.current = true
+
     // Notify peer
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
       try {
@@ -296,6 +313,7 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
   // Cleanup on component unmount
   useEffect(() => {
     return () => {
+      isEndedRef.current = true
       if (webrtcManagerRef.current) {
         webrtcManagerRef.current.cleanup()
         webrtcManagerRef.current = null

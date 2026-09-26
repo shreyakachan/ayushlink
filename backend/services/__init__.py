@@ -36,6 +36,15 @@ from services.consultation_service import (
     get_consultations_history,
 )
 from services.sync_service import process_batch_sync
+from services.notification_service import (
+    create_prescription_notification,
+    create_doctor_consultation_notification,
+    get_patient_notifications,
+    get_doctor_notifications,
+    mark_notification_read,
+    mark_doctor_notification_read,
+    mark_all_doctor_notifications_read,
+)
 
 __all__ = [
     "hash_password",
@@ -68,4 +77,11 @@ __all__ = [
     "update_consultation_status",
     "get_consultations_history",
     "process_batch_sync",
+    "create_prescription_notification",
+    "create_doctor_consultation_notification",
+    "get_patient_notifications",
+    "get_doctor_notifications",
+    "mark_notification_read",
+    "mark_doctor_notification_read",
+    "mark_all_doctor_notifications_read",
 ]

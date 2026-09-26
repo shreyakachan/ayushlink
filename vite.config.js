@@ -51,18 +51,38 @@ export default defineConfig({
         ],
       },
       devOptions: {
-        // Let the SW register during `vite dev` too, so offline mode can be tested locally
-        enabled: true,
-        type: "module",
+        // Disabled in development to prevent stale caching, HMR disruption, and blank-page issues on refresh
+        enabled: false,
       },
     }),
   ],
   server: {
     port: 5173,
+    host: true,
+    strictPort: false,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+      "Pragma": "no-cache",
+      "Expires": "0",
+    },
+    hmr: {
+      overlay: true,
+    },
+    watch: {
+      ignored: [
+        "**/backend/**",
+        "**/.git/**",
+        "**/dist/**",
+        "**/node_modules/**",
+        "**/.vscode/**",
+      ],
+    },
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        target: "http://127.0.0.1:8000",
         changeOrigin: true,
+        secure: false,
+        ws: true,
       },
     },
   },

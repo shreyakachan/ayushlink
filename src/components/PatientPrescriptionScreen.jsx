@@ -16,59 +16,54 @@ import { getPatientPrescriptions } from "../lib/api.js"
  * pipeline (see prompt #10) exists.
  */
 
-const DEFAULT_PRESCRIPTION = {
-  id: "RX-1042",
-  doctorName: "Dr. Anjali Rao",
-  date: "19 July 2026",
-  diagnosis: "Viral fever with mild dehydration",
-  medicines: [
-    { id: "m1", name: "Paracetamol 650mg", dosage: "1 tablet, twice a day, after food", duration: "5 days" },
-    { id: "m2", name: "ORS Sachet", dosage: "1 sachet in water after every loose motion", duration: "3 days" },
-  ],
-  notes: "Drink plenty of fluids and rest. Come back if the fever lasts more than 3 days.",
-}
-
-// Same prescription content, translated per patient language, so the
-// "listen" feature genuinely speaks the instructions in that language —
-// not just the English text read with a different voice accent.
-const PRESCRIPTION_SPOKEN_CONTENT = {
-  en: {
-    diagnosis: "Viral fever with mild dehydration",
-    medicines: [
-      { name: "Paracetamol 650mg", dosage: "1 tablet, twice a day, after food", duration: "5 days" },
-      { name: "ORS Sachet", dosage: "1 sachet in water after every loose motion", duration: "3 days" },
-    ],
-    notes: "Drink plenty of fluids and rest. Come back if the fever lasts more than 3 days.",
-  },
-  hi: {
-    diagnosis: "हल्के निर्जलीकरण के साथ वायरल बुखार",
-    medicines: [
-      { name: "पैरासिटामोल 650mg", dosage: "1 गोली, दिन में दो बार, खाने के बाद", duration: "5 दिन" },
-      { name: "ORS सैशे", dosage: "हर पतले दस्त के बाद 1 सैशे पानी में घोलकर", duration: "3 दिन" },
-    ],
-    notes: "खूब तरल पदार्थ पिएं और आराम करें। अगर बुखार 3 दिन से ज़्यादा रहे तो वापस आएं।",
-  },
-  mr: {
-    diagnosis: "सौम्य निर्जलीकरणासह विषाणूजन्य ताप",
-    medicines: [
-      { name: "पॅरासिटामॉल 650mg", dosage: "1 गोळी, दिवसातून दोनदा, जेवणानंतर", duration: "5 दिवस" },
-      { name: "ORS सॅशे", dosage: "प्रत्येक पातळ शौचानंतर 1 सॅशे पाण्यात मिसळून", duration: "3 दिवस" },
-    ],
-    notes: "भरपूर द्रव प्या आणि विश्रांती घ्या. ताप 3 दिवसांपेक्षा जास्त राहिल्यास परत या.",
-  },
-}
-
 function buildSpokenSummary(lang, rx) {
+  if (!rx) return ""
   const t = patientT(lang)
-  const content = PRESCRIPTION_SPOKEN_CONTENT[lang] || PRESCRIPTION_SPOKEN_CONTENT.en
-  const meds = (rx?.medicines?.length ? rx.medicines : content.medicines)
+  const meds = (rx.medicines || [])
     .map((m) => `${m.name}, ${m.dosage || m.frequency || ""}, ${t.forDuration} ${m.duration || ""}`)
     .join(". ")
-  return `${t.spokenIntro} ${rx.doctorName || "Dr. Anjali Rao"}. ${t.diagnosisLabel}: ${rx.diagnosis || content.diagnosis}. ${t.medicinesSectionLabel}: ${meds}. ${t.doctorNoteLabel}: ${rx.notes || content.notes}`
+  let summary = `${t.spokenIntro} ${rx.doctorName || "Doctor"}.`
+  if (rx.diagnosis) {
+    summary += ` ${t.diagnosisLabel}: ${rx.diagnosis}.`
+  }
+  if (rx.notes) {
+    summary += ` ${t.examinationFindingsLabel || t.doctorNoteLabel}: ${rx.notes}.`
+  }
+  if (meds) {
+    summary += ` ${t.medicinesSectionLabel}: ${meds}.`
+  }
+  if (rx.advice) {
+    summary += ` ${t.doctorAdviceLabel || t.doctorNoteLabel}: ${rx.advice}.`
+  }
+  return summary
+}
+
+function formatPrescription(latest) {
+  if (!latest) return null
+  return {
+    id: latest.prescription_id || latest.id || "RX-1001",
+    doctorName: latest.doctor_name || latest.doctorName || "Doctor",
+    date: latest.date
+      ? new Date(latest.date).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : "Today",
+    diagnosis: latest.diagnosis || "Consultation Assessment",
+    medicines: (latest.medicines || []).map((m, idx) => ({
+      id: m.id || `m-${idx}`,
+      name: m.name || m.medicine_name,
+      dosage: `${m.dosage || ""}${m.frequency ? ` (${m.frequency})` : ""}${m.instructions ? ` - ${m.instructions}` : ""}`,
+      duration: m.duration || "",
+    })),
+    notes: latest.notes || "",
+    advice: latest.advice || latest.instructions || "",
+  }
 }
 
 export default function PatientPrescriptionScreen({ prescription: initialPrescription, lang = "en", onBack }) {
-  const [prescription, setPrescription] = useState(initialPrescription || null)
+  const [prescription, setPrescription] = useState(initialPrescription ? formatPrescription(initialPrescription) : null)
   const [loading, setLoading] = useState(true)
   const t = patientT(lang)
   const langLabel = PATIENT_LANGUAGES.find((l) => l.code === lang)?.label
@@ -80,20 +75,7 @@ export default function PatientPrescriptionScreen({ prescription: initialPrescri
         setLoading(true)
         const rxList = await getPatientPrescriptions()
         if (Array.isArray(rxList) && rxList.length > 0) {
-          const latest = rxList[0]
-          setPrescription({
-            id: latest.prescription_id || latest.id || "RX-1001",
-            doctorName: latest.doctor_name || "Doctor",
-            date: latest.date ? new Date(latest.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Today",
-            diagnosis: latest.diagnosis || "Consultation Assessment",
-            medicines: (latest.medicines || []).map((m, idx) => ({
-              id: `m-${idx}`,
-              name: m.name || m.medicine_name,
-              dosage: `${m.dosage || ""}${m.frequency ? ` (${m.frequency})` : ""}${m.instructions ? ` - ${m.instructions}` : ""}`,
-              duration: m.duration || "",
-            })),
-            notes: latest.advice || latest.notes || "Follow prescribed dosage.",
-          })
+          setPrescription(formatPrescription(rxList[0]))
         } else {
           setPrescription(null)
         }
@@ -201,10 +183,19 @@ export default function PatientPrescriptionScreen({ prescription: initialPrescri
               )}
             </div>
 
+            {/* Doctor's Notes & Examination Findings */}
             {prescription.notes && (
-              <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 p-4">
-                <p className="text-sm font-semibold text-amber-800">{t.doctorNoteLabel}</p>
-                <p className="mt-1 text-sm text-amber-700">{prescription.notes}</p>
+              <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+                <p className="text-sm font-semibold text-sky-900">{t.examinationFindingsLabel || "Doctor's Notes & Examination Findings"}</p>
+                <p className="mt-1 text-sm text-sky-800 leading-relaxed whitespace-pre-line">{prescription.notes}</p>
+              </div>
+            )}
+
+            {/* Doctor's Advice & Dietary Guidelines */}
+            {prescription.advice && (
+              <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-900">{t.doctorAdviceLabel || "Doctor's Advice & Dietary Guidelines"}</p>
+                <p className="mt-1 text-sm text-amber-800 leading-relaxed whitespace-pre-line">{prescription.advice}</p>
               </div>
             )}
           </section>

@@ -1,10 +1,12 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { ASHA_LANGUAGES, ashaT } from "../lib/ashaI18n.js"
+import { getAuthUser, getAuthRole, getDoctorProfile } from "../lib/api.js"
 
 /**
  * AyushLink — Profile
  * React + JavaScript + Tailwind CSS
- * Health worker profile, stats and app settings.
+ * Health worker / Doctor profile, stats and app settings.
+ * Dynamically resolves authenticated doctor / health worker identity.
  */
 
 const RAW_STATS = [
@@ -13,6 +15,22 @@ const RAW_STATS = [
   { key: "villagesCovered", defaultLabel: "Villages covered", value: "3" },
   { key: "monthsActive", defaultLabel: "Months active", value: "14" },
 ]
+
+function getInitials(name, isDoctor) {
+  if (!name) return isDoctor ? "DR" : "AW"
+  const cleaned = String(name).replace(/^(Dr\.?|Doctor|Shri|Smt\.?)\s+/i, "").trim()
+  const parts = cleaned.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
+  }
+  if (parts.length === 1 && parts[0].length >= 2) {
+    return parts[0].slice(0, 2).toUpperCase()
+  }
+  if (parts.length === 1 && parts[0].length === 1) {
+    return parts[0].toUpperCase()
+  }
+  return isDoctor ? "DR" : "AW"
+}
 
 /* ---------- Inline icons (matches app's existing icon style) ---------- */
 function BackIcon({ className }) {
@@ -133,43 +151,208 @@ function Toggle({ checked, onChange }) {
   )
 }
 
-export default function ProfileScreen({ lang = "en", onLangChange, onBack, onLogout }) {
+export default function ProfileScreen({
+  lang = "en",
+  onLangChange,
+  onBack,
+  onLogout,
+  user = null,
+  role = null,
+}) {
   const [toggles, setToggles] = useState({ notifications: true, offline: true })
   const [showLangModal, setShowLangModal] = useState(false)
   const t = ashaT(lang)
+
+  const [profileUser, setProfileUser] = useState(() => user || getAuthUser() || {})
+  const authRole = role || getAuthRole() || (profileUser?.doctor_id ? "doctor" : "asha")
+  const isDoctor = authRole === "doctor" || !!profileUser?.doctor_id
+
+  useEffect(() => {
+    let isMounted = true
+    if (user) {
+      setProfileUser(user)
+    } else {
+      const stored = getAuthUser()
+      if (stored) {
+        setProfileUser(stored)
+      }
+    }
+
+    if (isDoctor) {
+      getDoctorProfile()
+        .then((doc) => {
+          if (isMounted && doc && (doc.full_name || doc.doctor_id)) {
+            setProfileUser((prev) => ({ ...prev, ...doc }))
+          }
+        })
+        .catch(() => {})
+    }
+
+    return () => {
+      isMounted = false
+    }
+  }, [user, isDoctor])
 
   const toggle = (id) => setToggles((prev) => ({ ...prev, [id]: !prev[id] }))
 
   const currentLangObj = ASHA_LANGUAGES.find((l) => l.code === lang) || ASHA_LANGUAGES[0]
 
+  // Dynamic Name
+  const displayName =
+    profileUser.full_name ||
+    profileUser.name ||
+    (isDoctor ? "Doctor" : "ASHA Worker")
+
+  // Dynamic Initials
+  const initials = getInitials(displayName, isDoctor)
+
+  // Dynamic Subtitle / Specialization & Facility
+  let roleSubtitle = ""
+  if (isDoctor) {
+    if (profileUser.specialization && profileUser.assigned_facility) {
+      roleSubtitle = `${profileUser.specialization} · ${profileUser.assigned_facility}`
+    } else if (profileUser.specialization) {
+      roleSubtitle = profileUser.specialization
+    } else if (profileUser.qualification) {
+      roleSubtitle = `${profileUser.qualification} · ${profileUser.assigned_facility || "Chandapur PHC"}`
+    } else {
+      roleSubtitle = "General Physician & AYUSH Consultant"
+    }
+  } else {
+    roleSubtitle = t.profile?.healthWorkerRole || "Health Worker · Chandapur PHC"
+  }
+
+  // Dynamic Verified Badge
+  let verifiedBadge = ""
+  if (isDoctor) {
+    verifiedBadge = profileUser.doctor_id
+      ? `Verified Doctor · ${profileUser.doctor_id}`
+      : "Verified Doctor"
+  } else {
+    verifiedBadge = profileUser.asha_id
+      ? `Verified ASHA · ${profileUser.asha_id}`
+      : (t.profile?.verifiedBadge || "Verified ASHA Worker")
+  }
+
+  // Dynamic Stats
+  const dynamicStats = isDoctor
+    ? [
+        {
+          key: "consultations",
+          label: "Consultations",
+          value:
+            profileUser.stats?.consultations_completed !== undefined
+              ? String(profileUser.stats.consultations_completed)
+              : "0",
+        },
+        {
+          key: "prescriptions",
+          label: "Prescriptions",
+          value:
+            profileUser.stats?.prescriptions_signed !== undefined
+              ? String(profileUser.stats.prescriptions_signed)
+              : "0",
+        },
+        {
+          key: "activeCases",
+          label: "Active Cases",
+          value:
+            profileUser.stats?.active_cases !== undefined
+              ? String(profileUser.stats.active_cases)
+              : "0",
+        },
+        {
+          key: "monthsActive",
+          label: "Months Active",
+          value:
+            profileUser.stats?.months_active !== undefined
+              ? String(profileUser.stats.months_active)
+              : "14",
+        },
+      ]
+    : RAW_STATS.map((s) => ({
+        key: s.key,
+        label: t.profile?.stats?.[s.key] || s.defaultLabel,
+        value:
+          profileUser.stats?.[s.key] !== undefined
+            ? String(profileUser.stats[s.key])
+            : s.value,
+      }))
+
+  const credentialsDesc = isDoctor
+    ? (profileUser.doctor_id
+        ? `Doctor ID: ${profileUser.doctor_id}`
+        : (profileUser.registration_number
+            ? `Reg: ${profileUser.registration_number}`
+            : (t.profile?.items?.credentialsDesc || "Medical Registration & ID")))
+    : (profileUser.asha_id
+        ? `ASHA ID: ${profileUser.asha_id}`
+        : (t.profile?.items?.credentialsDesc || "ASHA worker ID, certification"))
+
+  const editProfileDesc = profileUser.phone
+    ? `+91 ${String(profileUser.phone).replace(/\D/g, "").slice(-10)}`
+    : (t.profile?.items?.editProfileDesc || "Name, photo and contact details")
+
   const settingsSections = [
     {
-      title: t.profile.sections.account,
+      title: t.profile?.sections?.account || "Account",
       items: [
-        { id: "edit-profile", label: t.profile.items.editProfile, desc: t.profile.items.editProfileDesc, Icon: UserIcon },
-        { id: "credentials", label: t.profile.items.credentials, desc: t.profile.items.credentialsDesc, Icon: BadgeIcon },
+        {
+          id: "edit-profile",
+          label: t.profile?.items?.editProfile || "Edit profile",
+          desc: editProfileDesc,
+          Icon: UserIcon,
+        },
+        {
+          id: "credentials",
+          label: t.profile?.items?.credentials || "Credentials & ID",
+          desc: credentialsDesc,
+          Icon: BadgeIcon,
+        },
       ],
     },
     {
-      title: t.profile.sections.preferences,
+      title: t.profile?.sections?.preferences || "Preferences",
       items: [
         {
           id: "language",
-          label: t.profile.items.language,
+          label: t.profile?.items?.language || "App language",
           desc: currentLangObj.label,
           Icon: GlobeIcon,
           toggle: false,
           onClick: () => setShowLangModal(true),
         },
-        { id: "notifications", label: t.profile.items.notifications, desc: t.profile.items.notificationsDesc, Icon: BellIcon, toggle: true },
-        { id: "offline", label: t.profile.items.offline, desc: t.profile.items.offlineDesc, Icon: OfflineIcon, toggle: true },
+        {
+          id: "notifications",
+          label: t.profile?.items?.notifications || "Push notifications",
+          desc: t.profile?.items?.notificationsDesc || "Alerts & updates",
+          Icon: BellIcon,
+          toggle: true,
+        },
+        {
+          id: "offline",
+          label: t.profile?.items?.offline || "Offline-first mode",
+          desc: t.profile?.items?.offlineDesc || "Local caching enabled",
+          Icon: OfflineIcon,
+          toggle: true,
+        },
       ],
     },
     {
-      title: t.profile.sections.support,
+      title: t.profile?.sections?.support || "Support",
       items: [
-        { id: "help", label: t.profile.items.help, desc: t.profile.items.helpDesc, Icon: HelpIcon },
-        { id: "about", label: t.profile.items.about, desc: t.profile.items.aboutDesc, Icon: InfoIcon },
+        {
+          id: "help",
+          label: t.profile?.items?.help || "Help & FAQs",
+          desc: t.profile?.items?.helpDesc || "Guides for common tasks",
+          Icon: HelpIcon,
+        },
+        {
+          id: "about",
+          label: t.profile?.items?.about || "About AyushLink",
+          desc: t.profile?.items?.aboutDesc || "Version 1.4.0",
+          Icon: InfoIcon,
+        },
       ],
     },
   ]
@@ -187,30 +370,32 @@ export default function ProfileScreen({ lang = "en", onLangChange, onBack, onLog
           >
             <BackIcon className="h-5 w-5" />
           </button>
-          <h1 className="text-base font-bold leading-tight text-slate-800">{t.profile.title}</h1>
+          <h1 className="text-base font-bold leading-tight text-slate-800">{t.profile?.title || "Profile"}</h1>
         </header>
 
         <div className="flex flex-1 flex-col gap-6 px-4 py-6">
           {/* Profile card */}
           <section className="flex flex-col items-center gap-3 rounded-3xl border border-blue-100 bg-white p-6 text-center shadow-sm">
             <span className="flex h-20 w-20 items-center justify-center rounded-full bg-blue-600 text-2xl font-bold text-white shadow-lg shadow-blue-600/25">
-              AR
+              {initials}
             </span>
             <div>
-              <h2 className="text-lg font-bold text-slate-800">Dr. Anjali Rao</h2>
-              <p className="text-sm text-slate-500">{t.profile.roleSubtitle}</p>
+              <h2 className="text-lg font-bold text-slate-800">{displayName}</h2>
+              <p className="text-sm text-slate-500">{roleSubtitle}</p>
             </div>
             <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-              {t.profile.verifiedBadge}
+              {verifiedBadge}
             </span>
           </section>
 
           {/* Stats */}
           <section>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">{t.profile.yourImpact}</h2>
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+              {t.profile?.impactTitle || t.profile?.yourImpact || "Your impact"}
+            </h2>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {RAW_STATS.map((s) => {
-                const label = t.profile.stats[s.key] || s.defaultLabel
+              {dynamicStats.map((s) => {
+                const label = isDoctor ? s.label : (t.profile?.stats?.[s.key] || s.label || s.defaultLabel)
                 return (
                   <div key={s.key} className="flex flex-col gap-1 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
                     <p className="text-2xl font-bold leading-none text-slate-800">{s.value}</p>
@@ -259,7 +444,7 @@ export default function ProfileScreen({ lang = "en", onLangChange, onBack, onLog
             className="flex w-full items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-6 py-4 text-base font-semibold text-red-600 transition hover:bg-red-100 active:scale-[0.99]"
           >
             <LogoutIcon className="h-5 w-5" />
-            {t.profile.logout}
+            {t.profile?.logout || "Log out"}
           </button>
         </div>
       </div>
@@ -271,7 +456,7 @@ export default function ProfileScreen({ lang = "en", onLangChange, onBack, onLog
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <GlobeIcon className="h-5 w-5 text-blue-600" />
-                <h3 className="text-base font-bold text-slate-800">{t.profile.selectLanguage}</h3>
+                <h3 className="text-base font-bold text-slate-800">{t.profile?.selectLangTitle || t.profile?.selectLanguage || "Select Language"}</h3>
               </div>
               <button
                 type="button"

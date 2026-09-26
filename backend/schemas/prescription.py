@@ -18,6 +18,8 @@ class PrescriptionCreateRequest(BaseModel):
     diagnosis: Optional[str] = Field(default=None, max_length=500, description="Clinical diagnosis")
     medicines: List[MedicineItemSchema] = Field(..., min_items=1, description="List of prescribed medicines")
     instructions: Optional[str] = Field(default=None, max_length=2000, description="General doctor advice/diet instructions")
+    advice: Optional[str] = Field(default=None, max_length=2000, description="Doctor's Advice & Dietary Guidelines")
+    notes: Optional[str] = Field(default=None, max_length=2000, description="Additional notes")
     status: str = Field(default="active", description="active | completed | requested")
 
 
@@ -33,6 +35,9 @@ class PrescriptionResponse(BaseModel):
     diagnosis: Optional[str] = None
     medicines: List[MedicineItemSchema] = []
     instructions: Optional[str] = None
+    advice: Optional[str] = None
+    notes: Optional[str] = None
+    consultation_id: Optional[str] = None
     date: datetime
     status: str = "active"
     created_at: Optional[datetime] = None

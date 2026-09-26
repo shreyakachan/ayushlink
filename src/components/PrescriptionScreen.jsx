@@ -191,7 +191,7 @@ export default function PrescriptionScreen({ lang = "en", onBack }) {
           const formatted = liveList.map((p) => ({
             id: p.prescription_id || p.id,
             patientName: p.patient_name || p.patient_id || "Patient",
-            village: p.village || "Chandapur",
+            village: p.village || p.patient_village || "Chandapur",
             date: p.date ? new Date(p.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
             doctorName: p.doctor_name || DOCTOR_NAME,
             diagnosis: p.diagnosis || "Medical Consultation",
@@ -201,8 +201,8 @@ export default function PrescriptionScreen({ lang = "en", onBack }) {
               dosage: m.dosage || "",
               duration: m.duration || "5 days",
             })),
-            notes: p.advice || p.notes || "",
-            status: "active",
+            notes: p.advice || p.instructions || p.notes || "",
+            status: p.status || "active",
           }))
           setPrescriptions(formatted)
         }
@@ -272,7 +272,9 @@ export default function PrescriptionScreen({ lang = "en", onBack }) {
           duration: m.duration || "5 days",
           instructions: "after meals",
         })),
-        advice: form.notes.trim() || "Follow prescribed dosage and rest well.",
+        instructions: form.notes.trim() || undefined,
+        advice: form.notes.trim() || undefined,
+        notes: form.notes.trim() || undefined,
       })
     } catch {}
   }

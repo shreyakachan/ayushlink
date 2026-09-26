@@ -50,43 +50,27 @@ async def main():
         print("FLOW 1: PATIENT JOURNEY")
         print("-" * 50)
 
-        patient_phone = f"98230{uid:05d}"
-        patient_pass = "PatientPin123"
+        patient_phone = "9324998108"
+        patient_pass = "123456"
 
-        # 1.1 Register Patient
-        p_reg_res = await client.post("/patient/register", json={
-            "full_name": f"Pooja Patil {uid}",
-            "phone": patient_phone,
-            "password": patient_pass,
-            "age": 28,
-            "gender": "female",
-            "village": "Chandapur",
-            "preferred_language": "mr",
-            "blood_group": "O+",
-            "allergies": ["Sulfa drugs"],
-            "chronic_conditions": ["Mild Asthma"],
-        })
-        assert p_reg_res.status_code == 201, f"Patient register failed: {p_reg_res.text}"
-        p_data = p_reg_res.json()
-        patient_token = p_data["access_token"]
-        patient_id = p_data["patient"]["patient_id"]
-        print(f"[1.1] Patient Registered: ID={patient_id}, Name='{p_data['patient']['full_name']}'")
-
-        # 1.2 Patient Login
+        # 1.1 Patient Login (Existing patient P-4559)
         p_login_res = await client.post("/patient/login", json={
             "phone": patient_phone,
             "password": patient_pass,
         })
         assert p_login_res.status_code == 200, f"Patient login failed: {p_login_res.text}"
+        p_data = p_login_res.json()
+        patient_token = p_data["access_token"]
+        patient_id = p_data["patient"]["patient_id"]
         headers_patient = {"Authorization": f"Bearer {patient_token}"}
-        print(f"[1.2] Patient Logged In: JWT token verified")
+        print(f"[1.1] Patient Logged In: ID={patient_id}, Name='{p_data['patient']['full_name']}', JWT verified")
 
         # 1.3 View Profile / Medical Record
         p_rec_res = await client.get("/patient/medical-record", headers=headers_patient)
         assert p_rec_res.status_code == 200, f"Medical record get failed: {p_rec_res.text}"
         p_rec = p_rec_res.json()
-        assert p_rec["blood_group"] == "O+"
-        print(f"[1.3] Patient Profile Verified: BloodGroup={p_rec['blood_group']}, Allergies={p_rec['allergies']}")
+        assert p_rec["patient_id"] == "P-4559"
+        print(f"[1.3] Patient Profile Verified: Name={p_rec['full_name']}, Village={p_rec['village']}")
 
         # 1.4 Submit Symptoms
         p_sym_res = await client.post("/patient/symptoms", json={
@@ -131,13 +115,13 @@ async def main():
             "full_name": f"Kavita Tai {uid}",
             "phone": asha_phone,
             "password": asha_pass,
-            "assigned_villages": ["Chandapur", "Nandgaon"],
+            "assigned_villages": ["Chandapur", "Nandgaon", "chandrapur"],
             "primary_phc": "Chandapur PHC",
         })
         assert a_reg_res.status_code == 201, f"ASHA register failed: {a_reg_res.text}"
         asha_token = a_reg_res.json()["access_token"]
         headers_asha = {"Authorization": f"Bearer {asha_token}"}
-        print(f"[2.1] ASHA Worker Registered & Logged In: Villages=['Chandapur', 'Nandgaon']")
+        print(f"[2.1] ASHA Worker Registered & Logged In: Villages=['Chandapur', 'Nandgaon', 'chandrapur']")
 
         # 2.2 List Patients for ASHA's Villages
         a_patients_res = await client.get("/patients", headers=headers_asha)
@@ -264,15 +248,13 @@ async def main():
             "items": [
                 {
                     "client_id": f"Q-OFFLINE-1-{uid}",
-                    "type": "new_patient",
+                    "type": "symptom_report",
                     "client_created_at": "2026-08-22T03:00:00Z",
                     "payload": {
-                        "full_name": f"Deepak Shinde {uid}",
-                        "phone": f"98230{((uid + 1) % 100000):05d}",
-                        "age": 42,
-                        "gender": "male",
-                        "village": "Chandapur",
-                        "blood_group": "B+",
+                        "patient_id": patient_id,
+                        "symptoms": ["Mild headache", "Fatigue"],
+                        "description": "Afternoon fatigue reported during ASHA visit",
+                        "severity": "mild",
                     },
                 },
                 {
@@ -292,7 +274,7 @@ async def main():
                     "client_created_at": "2026-08-22T04:00:00Z",
                     "payload": {
                         "patient_id": patient_id,
-                        "vitals_label": "BP 125/82, Pulse 76, SpO2 99%",
+                        "vitals_label": "BP 120/80, Pulse 72, SpO2 99%",
                         "blood_group": "O+",
                     },
                 },

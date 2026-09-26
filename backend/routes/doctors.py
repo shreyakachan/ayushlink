@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, status
 from schemas.doctor import (
     DoctorRegisterRequest,
     DoctorLoginRequest,
+    DoctorResponse,
     DoctorAuthResponse,
     DoctorPatientCaseResponse,
     DoctorMchCaseResponse,
@@ -13,12 +14,14 @@ from services.security import get_current_doctor
 from services.doctor_service import (
     register_doctor,
     login_doctor,
+    doc_to_doctor_response,
     get_doctor_patient_cases,
     get_doctor_submitted_patients,
     get_doctor_mch_cases,
     get_patient_records_for_doctor,
     assign_patient_to_doctor,
     get_asha_workers_for_doctor,
+    get_available_doctors,
 )
 
 router = APIRouter(tags=["Doctor Management & Consultations"])
@@ -48,6 +51,29 @@ async def register(doctor_data: DoctorRegisterRequest):
 )
 async def login(credentials: DoctorLoginRequest):
     return await login_doctor(credentials)
+
+
+@router.get(
+    "/doctor/profile",
+    response_model=DoctorResponse,
+    summary="Get current doctor profile (Doctor only)",
+    description="Returns the profile of the currently authenticated Doctor from the database.",
+)
+async def get_doctor_profile(
+    current_doctor: dict = Depends(get_current_doctor),
+):
+    return doc_to_doctor_response(current_doctor)
+
+
+@router.get(
+    "/doctor/me",
+    response_model=DoctorResponse,
+    include_in_schema=False,
+)
+async def get_doctor_me(
+    current_doctor: dict = Depends(get_current_doctor),
+):
+    return doc_to_doctor_response(current_doctor)
 
 
 # ==========================================
@@ -154,6 +180,36 @@ async def view_mch_cases_alias(current_doctor: dict = Depends(get_current_doctor
     return await get_doctor_mch_cases(current_doctor)
 
 
+@router.get("/doctors/profile", response_model=DoctorResponse, include_in_schema=False)
+async def view_profile_alias(current_doctor: dict = Depends(get_current_doctor)):
+    return doc_to_doctor_response(current_doctor)
+
+
+@router.get("/doctors/me", response_model=DoctorResponse, include_in_schema=False)
+async def view_me_alias(current_doctor: dict = Depends(get_current_doctor)):
+    return doc_to_doctor_response(current_doctor)
+
+
 @router.get("/doctors/asha-workers", response_model=List[AshaWorkerResponse], include_in_schema=False)
 async def view_asha_workers_alias(current_doctor: dict = Depends(get_current_doctor)):
     return await get_asha_workers_for_doctor(current_doctor)
+
+
+@router.get(
+    "/doctors",
+    response_model=List[DoctorResponse],
+    summary="List available doctors for consultation",
+    description="Returns a list of all active registered doctors from MongoDB with their specialization, assigned facility, and availability.",
+)
+async def list_available_doctors():
+    return await get_available_doctors()
+
+
+@router.get(
+    "/doctor",
+    response_model=List[DoctorResponse],
+    include_in_schema=False,
+)
+async def list_doctors_singular_alias():
+    return await get_available_doctors()
+

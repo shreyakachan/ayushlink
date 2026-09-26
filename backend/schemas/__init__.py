@@ -41,6 +41,7 @@ from schemas.sync import (
     SyncItemResult,
     BatchSyncResponse,
 )
+from schemas.notification import NotificationResponse
 
 __all__ = [
     "HealthResponse",
@@ -72,4 +73,5 @@ __all__ = [
     "BatchSyncRequest",
     "SyncItemResult",
     "BatchSyncResponse",
+    "NotificationResponse",
 ]

@@ -15,6 +15,7 @@ const STATUS_TONE = {
   amber: "bg-amber-50 text-amber-700 border-amber-100",
   blue: "bg-blue-50 text-blue-700 border-blue-100",
   emerald: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  rose: "bg-rose-50 text-rose-700 border-rose-100",
 }
 
 const AVATAR_TONE = "bg-rose-50 text-rose-600 border border-rose-100"
@@ -287,7 +288,11 @@ function MchCaseList({ cases, emptyMsg, reminded, onRemind, t }) {
     <div className="flex flex-col gap-3">
       {cases.map((c) => {
         const isReminded = reminded.has(c.patient_id)
-        const initials = c.full_name
+        const displayName = (c.full_name || "Patient")
+          .split(" ")
+          .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : ""))
+          .join(" ")
+        const initials = displayName
           .split(" ")
           .map((w) => w[0])
           .slice(0, 2)
@@ -303,7 +308,7 @@ function MchCaseList({ cases, emptyMsg, reminded, onRemind, t }) {
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="truncate text-sm font-bold text-slate-800">{c.full_name}</p>
+                  <p className="truncate text-sm font-bold text-slate-800">{displayName}</p>
                   <span className="font-mono text-xs font-semibold text-slate-400">({c.patient_id})</span>
                   {c.is_high_risk && (
                     <span className="rounded-md bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700">

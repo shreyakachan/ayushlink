@@ -24,6 +24,14 @@ function formatDate(iso) {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
 }
 
+function formatPatientName(name) {
+  if (!name || typeof name !== "string") return "Patient"
+  return name
+    .split(" ")
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ""))
+    .join(" ")
+}
+
 /* ---------- Inline icons ---------- */
 function BackIcon({ className }) {
   return (
@@ -121,7 +129,7 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew, onO
               : latestSymptom?.description || p.condition || (p.chronic_conditions?.length ? p.chronic_conditions[0] : "General Consultation")
             return {
               id: p.patient_id || p.id,
-              name: p.full_name || p.name,
+              name: formatPatientName(p.full_name || p.name),
               age: p.age || 30,
               gender: p.gender ? p.gender.charAt(0).toUpperCase() + p.gender.slice(1) : "Female",
               village: p.village || "Chandapur",

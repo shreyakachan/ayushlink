@@ -5,6 +5,7 @@ from models.doctor import Doctor
 from models.symptom import SymptomRecord
 from models.prescription import Prescription, MedicineItem
 from models.consultation import Consultation
+from models.notification import Notification
 
 __all__ = [
     "MongoBaseModel",
@@ -15,4 +16,5 @@ __all__ = [
     "Prescription",
     "MedicineItem",
     "Consultation",
+    "Notification",
 ]

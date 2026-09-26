@@ -4,7 +4,10 @@
  */
 
 export const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:8000/api"
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== "undefined" && window.location?.origin
+    ? "/api"
+    : "http://127.0.0.1:8000/api")
 
 // Token & Session Storage Keys
 const TOKEN_KEY = "ayushlink_token"
@@ -88,6 +91,8 @@ export async function apiFetch(endpoint, options = {}) {
 
     if (!response.ok) {
       let errorMsg = `Request failed with status ${response.status}`
+      let isBackendOffline = response.status === 502 || response.status === 503 || response.status === 504
+
       if (typeof data === "object" && data !== null) {
         if (typeof data.detail === "string") {
           errorMsg = data.detail
@@ -98,10 +103,22 @@ export async function apiFetch(endpoint, options = {}) {
         } else if (data.error) {
           errorMsg = data.error
         }
+      } else if (typeof data === "string") {
+        if (
+          data.includes("ECONNREFUSED") ||
+          data.includes("connect ECONNREFUSED") ||
+          data.includes("Failed to proxy") ||
+          data.includes("Proxy error")
+        ) {
+          errorMsg = "Backend server is offline or starting up."
+          isBackendOffline = true
+        }
       }
+
       const error = new Error(errorMsg)
       error.status = response.status
       error.data = data
+      error.isOffline = isBackendOffline
       throw error
     }
 
@@ -217,10 +234,14 @@ export async function loginDoctor(phone, password) {
   return res
 }
 
+export async function getDoctorProfile() {
+  return await apiFetch("/doctor/profile")
+}
+
 export async function registerDoctor(doctorData) {
   const cleanPhone = String(doctorData.phone || doctorData.mobile).replace(/\D/g, "").slice(-10)
   const payload = {
-    full_name: doctorData.full_name || doctorData.fullName || "Dr. Anjali Rao",
+    full_name: doctorData.full_name || doctorData.fullName || "Doctor",
     phone: cleanPhone,
     password: doctorData.password || "DoctorSecurePass123",
     email: doctorData.email || null,
@@ -447,3 +468,54 @@ export async function syncBatch(items, batchId = null) {
 export async function checkSyncStatus() {
   return await apiFetch("/sync/status")
 }
+
+/* =========================================================================
+   In-App Notifications API Methods
+   ========================================================================= */
+
+export async function getDoctorNotifications() {
+  return await apiFetch("/doctor/notifications")
+}
+
+export async function markDoctorNotificationRead(notificationId) {
+  return await apiFetch(`/doctor/notifications/${notificationId}/read`, {
+    method: "PATCH",
+  })
+}
+
+export async function markAllDoctorNotificationsRead() {
+  return await apiFetch("/doctor/notifications/read-all", {
+    method: "PATCH",
+  })
+}
+
+export async function getPatientNotifications() {
+  return await apiFetch("/patient/notifications")
+}
+
+export async function getNotifications(role = null) {
+  const currentRole = role || getAuthRole()
+  if (currentRole === "doctor") {
+    return await getDoctorNotifications()
+  }
+  if (currentRole === "patient") {
+    return await getPatientNotifications()
+  }
+  // Default to doctor if token is doctor, else patient
+  try {
+    return await apiFetch("/doctor/notifications")
+  } catch {
+    return await apiFetch("/patient/notifications")
+  }
+}
+
+export async function markNotificationRead(notificationId, role = null) {
+  const currentRole = role || getAuthRole()
+  if (currentRole === "doctor") {
+    return await markDoctorNotificationRead(notificationId)
+  }
+  return await apiFetch(`/patient/notifications/${notificationId}/read`, {
+    method: "PATCH",
+  })
+}
+

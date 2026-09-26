@@ -48,6 +48,14 @@ const STATUS_BADGES = {
   cancelled: "bg-slate-100 text-slate-600 border-slate-200",
 }
 
+function formatPatientName(name) {
+  if (!name || typeof name !== "string") return "Patient"
+  return name
+    .split(" ")
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ""))
+    .join(" ")
+}
+
 export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation }) {
   const [activeNav, setActiveNav] = useState("dashboard")
   const [queue, setQueue] = useState([])
@@ -67,10 +75,10 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
   const [doctorProfile, setDoctorProfile] = useState(() => {
     const auth = getAuthUser()
     return {
-      name: auth?.full_name || auth?.name || "Dr. Ramesh Gupta",
-      qualification: auth?.qualification || (auth?.specialization ? `${auth.specialization}` : "General Physician & AYUSH Consultant"),
-      specialization: auth?.specialization || "General Physician & AYUSH Consultant",
-      facility: auth?.assigned_facility || "Chandapur PHC & District Hospital",
+      name: auth?.full_name || auth?.name || "Doctor",
+      qualification: auth?.qualification || (auth?.specialization ? `${auth.specialization}` : "Medical Officer"),
+      specialization: auth?.specialization || "Medical Officer",
+      facility: auth?.assigned_facility || "",
       isOnDuty: auth?.is_on_duty !== undefined ? auth.is_on_duty : true,
     }
   })
@@ -84,9 +92,9 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
         if (authUser?.full_name || authUser?.name) {
           setDoctorProfile({
             name: authUser.full_name || authUser.name,
-            qualification: authUser.qualification || (authUser.specialization ? `${authUser.specialization}` : "General Physician & AYUSH Consultant"),
-            specialization: authUser.specialization || "General Physician & AYUSH Consultant",
-            facility: authUser.assigned_facility || "Chandapur PHC & District Hospital",
+            qualification: authUser.qualification || (authUser.specialization ? `${authUser.specialization}` : "Medical Officer"),
+            specialization: authUser.specialization || "Medical Officer",
+            facility: authUser.assigned_facility || "",
             isOnDuty: authUser.is_on_duty !== undefined ? authUser.is_on_duty : true,
           })
         }
@@ -106,7 +114,7 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
             const rawUrgency = (c.urgency || (rawStatus === "urgent" || rawStatus === "critical" ? "urgent" : "normal")).toLowerCase()
             return {
               id: c.patient_id || `P-${4550 + idx}`,
-              name: c.full_name || "Patient",
+              name: formatPatientName(c.full_name || "Patient"),
               village: c.village || "Chandapur",
               age: c.age || 28,
               gender: c.gender ? c.gender.charAt(0).toUpperCase() + c.gender.slice(1) : "Female",

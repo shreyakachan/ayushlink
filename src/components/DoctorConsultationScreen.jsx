@@ -28,6 +28,14 @@ function formatTime(iso) {
   })
 }
 
+function formatPatientName(name) {
+  if (!name || typeof name !== "string") return "Patient"
+  return name
+    .split(" ")
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ""))
+    .join(" ")
+}
+
 const COMMON_DIAGNOSES = [
   "Acute Gastritis",
   "Viral Fever",
@@ -92,7 +100,8 @@ export default function DoctorConsultationScreen({
 }) {
   const doctor = getAuthUser()
   const patientId = patient?.id || patient?.patient_id || "P-4559"
-  const patientName = patient?.name || patient?.full_name || "Patient"
+  const rawPatientName = patient?.name || patient?.full_name || "Patient"
+  const patientName = formatPatientName(rawPatientName)
 
   const [patientRecord, setPatientRecord] = useState(null)
   const [consultationsHistory, setConsultationsHistory] = useState([])
@@ -231,7 +240,7 @@ export default function DoctorConsultationScreen({
       date_time: consultationTime,
       diagnosis: diagnosis.trim() || "Consultation Completed",
       notes: notes.trim() || "Routine clinical consultation conducted.",
-      advice: advice.trim() || "Follow prescribed dosages and drink plenty of clean water.",
+      advice: advice.trim(),
       medicines: validMedicines,
       status: "completed",
     }
@@ -287,7 +296,7 @@ export default function DoctorConsultationScreen({
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                Doctor: {doctor?.full_name || doctor?.name || "Dr. Ramesh Gupta"} • {formatDate(consultationTime)} {formatTime(consultationTime)}
+                Doctor: {doctor?.full_name || doctor?.name || "Doctor"} • {formatDate(consultationTime)} {formatTime(consultationTime)}
               </p>
             </div>
           </div>
@@ -577,10 +586,10 @@ export default function DoctorConsultationScreen({
                                   setViewingPrescription({
                                     prescription_id: matchingRx?.prescription_id || (cons.consultation_id ? `RX-${cons.consultation_id.replace('CONS-', '')}` : "RX-4454"),
                                     consultation_id: cons.consultation_id,
-                                    doctor_name: cons.doctor_name || matchingRx?.doctor_name || doctor?.full_name || "Dr. Ramesh Gupta",
+                                    doctor_name: cons.doctor_name || matchingRx?.doctor_name || doctor?.full_name || doctor?.name || "Doctor",
                                     diagnosis: cons.diagnosis || matchingRx?.diagnosis,
                                     notes: cons.notes,
-                                    advice: cons.advice || matchingRx?.instructions,
+                                    advice: cons.advice || matchingRx?.advice || matchingRx?.instructions || cons.notes || "",
                                     medicines: cons.medicines?.length ? cons.medicines : matchingRx?.medicines || [],
                                     date: cons.date_time || matchingRx?.date,
                                     status: cons.status,
@@ -952,9 +961,9 @@ export default function DoctorConsultationScreen({
 
                 <div>
                   <p className="text-[10px] uppercase font-bold text-slate-400">Prescribing Doctor</p>
-                  <p className="text-sm font-bold text-slate-800 mt-0.5">{viewingPrescription.doctor_name || doctor?.full_name || "Dr. Ramesh Gupta"}</p>
-                  <p className="text-slate-600 mt-0.5">General Physician & AYUSH Consultant</p>
-                  <p className="text-slate-500 mt-0.5">Chandapur PHC & District Hospital • Date: {formatDate(viewingPrescription.date || viewingPrescription.date_time)}</p>
+                  <p className="text-sm font-bold text-slate-800 mt-0.5">{viewingPrescription.doctor_name || doctor?.full_name || doctor?.name || "Doctor"}</p>
+                  <p className="text-slate-600 mt-0.5">{doctor?.specialization || "Medical Officer"}</p>
+                  <p className="text-slate-500 mt-0.5">{(doctor?.assigned_facility || doctor?.facility) ? `${doctor.assigned_facility || doctor.facility} • ` : ""}Date: {formatDate(viewingPrescription.date || viewingPrescription.date_time)}</p>
                 </div>
               </div>
 

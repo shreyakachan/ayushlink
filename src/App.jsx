@@ -32,12 +32,57 @@ import DoctorRegisterScreen from "./components/DoctorRegisterScreen.jsx"
 import DoctorConsultationScreen from "./components/DoctorConsultationScreen.jsx"
 import MaternalChildHealthScreen from "./components/MaternalChildHealthScreen.jsx"
 
+const VALID_SCREENS = new Set([
+  "splash",
+  "role-select",
+  "login",
+  "asha-register",
+  "doctor-register",
+  "patient-login",
+  "patient-register",
+  "patient-register-asha-help",
+  "home",
+  "doctor-home",
+  "patient-home",
+  "patient-symptoms",
+  "patient-prescription",
+  "patient-call",
+  "patient-medicines",
+  "patient-health-record",
+  "patient-contact-asha",
+  "patient-facilities",
+  "patient-family",
+  "patient-sos",
+  "register",
+  "abha-scan",
+  "prescriptions",
+  "ai",
+  "patients",
+  "doctor-consultation",
+  "sync",
+  "notifications",
+  "profile",
+  "sos",
+  "inventory",
+  "mch",
+])
+
 export default function App() {
-  const [screen, setScreen] = useState("splash")
+  const [screen, setScreenState] = useState("splash")
   const [role, setRole] = useState(null)
   const [currentPatient, setCurrentPatient] = useState(() => getAuthUser())
   const [scannedPatient, setScannedPatient] = useState(null)
   const [consultationPatient, setConsultationPatient] = useState(null)
+
+  const setScreen = (newScreen) => {
+    if (VALID_SCREENS.has(newScreen)) {
+      setScreenState(newScreen)
+    } else {
+      setScreenState("splash")
+    }
+  }
+
+  const activeScreen = VALID_SCREENS.has(screen) ? screen : "splash"
 
   // Language for the patient-side screens only (persisted independently)
   const [patientLang, setPatientLangState] = useState(() => {
@@ -126,8 +171,8 @@ export default function App() {
   return (
     <>
       <OfflineBadge lang={role === "patient" ? patientLang : ashaLang} />
-      {screen === "splash" && <SplashScreen onGetStarted={() => setScreen("role-select")} />}
-      {screen === "role-select" && (
+      {activeScreen === "splash" && <SplashScreen onGetStarted={() => setScreen("role-select")} />}
+      {activeScreen === "role-select" && (
         <RoleSelectScreen
           lang={role === "patient" ? patientLang : ashaLang}
           onLangChange={(l) => {
@@ -144,7 +189,7 @@ export default function App() {
           }}
         />
       )}
-      {screen === "login" && (
+      {activeScreen === "login" && (
         <LoginScreen
           role={role}
           lang={ashaLang}
@@ -160,7 +205,7 @@ export default function App() {
           onBack={() => setScreen("role-select")}
         />
       )}
-      {screen === "asha-register" && (
+      {activeScreen === "asha-register" && (
         <AshaRegisterScreen
           lang={ashaLang}
           onLangChange={setAshaLang}
@@ -172,7 +217,7 @@ export default function App() {
           }}
         />
       )}
-      {screen === "doctor-register" && (
+      {activeScreen === "doctor-register" && (
         <DoctorRegisterScreen
           lang={ashaLang}
           onLangChange={setAshaLang}
@@ -184,7 +229,7 @@ export default function App() {
           }}
         />
       )}
-      {screen === "patient-login" && (
+      {activeScreen === "patient-login" && (
         <PatientLoginScreen
           lang={patientLang}
           onLangChange={setPatientLang}
@@ -199,7 +244,7 @@ export default function App() {
           onBack={() => setScreen("role-select")}
         />
       )}
-      {screen === "patient-register" && (
+      {activeScreen === "patient-register" && (
         <PatientRegisterScreen
           lang={patientLang}
           onLangChange={setPatientLang}
@@ -214,10 +259,10 @@ export default function App() {
           onGetAshaHelp={() => setScreen("patient-register-asha-help")}
         />
       )}
-      {screen === "patient-register-asha-help" && (
+      {activeScreen === "patient-register-asha-help" && (
         <PatientContactAshaScreen lang={patientLang} onBack={() => setScreen("patient-register")} />
       )}
-      {screen === "home" && (
+      {activeScreen === "home" && (
         <HomeScreen
           lang={ashaLang}
           onLangChange={setAshaLang}
@@ -229,7 +274,7 @@ export default function App() {
           }}
         />
       )}
-      {screen === "doctor-home" && (
+      {activeScreen === "doctor-home" && (
         <DoctorHomeScreen
           onSelect={handleSelect}
           onStartConsultation={(p) => {
@@ -243,7 +288,7 @@ export default function App() {
           }}
         />
       )}
-      {screen === "patient-home" && (
+      {activeScreen === "patient-home" && (
         <PatientHomeScreen
           patient={currentPatient}
           lang={patientLang}
@@ -252,34 +297,34 @@ export default function App() {
           onBack={handlePatientLogout}
         />
       )}
-      {screen === "patient-symptoms" && (
+      {activeScreen === "patient-symptoms" && (
         <PatientSymptomScreen lang={patientLang} onBack={() => setScreen("patient-home")} />
       )}
-      {screen === "patient-prescription" && (
+      {activeScreen === "patient-prescription" && (
         <PatientPrescriptionScreen lang={patientLang} onBack={() => setScreen("patient-home")} />
       )}
-      {screen === "patient-call" && (
+      {activeScreen === "patient-call" && (
         <PatientCallScreen key={callSessionId} lang={patientLang} onBack={() => setScreen("patient-home")} />
       )}
-      {screen === "patient-medicines" && (
+      {activeScreen === "patient-medicines" && (
         <PatientMedicinesScreen lang={patientLang} onBack={() => setScreen("patient-home")} />
       )}
-      {screen === "patient-health-record" && (
+      {activeScreen === "patient-health-record" && (
         <PatientHealthRecordScreen lang={patientLang} onBack={() => setScreen("patient-home")} />
       )}
-      {screen === "patient-contact-asha" && (
+      {activeScreen === "patient-contact-asha" && (
         <PatientContactAshaScreen lang={patientLang} onBack={() => setScreen("patient-home")} />
       )}
-      {screen === "patient-facilities" && (
+      {activeScreen === "patient-facilities" && (
         <PatientFacilitiesScreen lang={patientLang} onBack={() => setScreen("patient-home")} />
       )}
-      {screen === "patient-family" && (
+      {activeScreen === "patient-family" && (
         <PatientFamilyContactsScreen lang={patientLang} onBack={() => setScreen("patient-home")} />
       )}
-      {screen === "patient-sos" && (
+      {activeScreen === "patient-sos" && (
         <EmergencySOSScreen lang={patientLang} onBack={() => setScreen("patient-home")} />
       )}
-      {screen === "register" && (
+      {activeScreen === "register" && (
         <RegisterPatient
           lang={ashaLang}
           initialData={scannedPatient}
@@ -297,7 +342,7 @@ export default function App() {
           }}
         />
       )}
-      {screen === "abha-scan" && (
+      {activeScreen === "abha-scan" && (
         <ABHAScannerScreen
           lang={ashaLang}
           onBack={goToRoleHome}
@@ -307,10 +352,10 @@ export default function App() {
           }}
         />
       )}
-      {screen === "prescriptions" && (
+      {activeScreen === "prescriptions" && (
         <PrescriptionScreen lang={ashaLang} onBack={goToRoleHome} />
       )}
-      {screen === "ai" && (
+      {activeScreen === "ai" && (
         <AISymptomChecker
           lang={ashaLang}
           onLangChange={setAshaLang}
@@ -319,7 +364,7 @@ export default function App() {
           onEmergency={() => setScreen("sos")}
         />
       )}
-      {screen === "patients" && (
+      {activeScreen === "patients" && (
         <PatientsScreen
           lang={ashaLang}
           onBack={goToRoleHome}
@@ -330,35 +375,42 @@ export default function App() {
           onRegisterNew={() => setScreen("register")}
         />
       )}
-      {screen === "doctor-consultation" && (
+      {activeScreen === "doctor-consultation" && (
         <DoctorConsultationScreen
           patient={consultationPatient}
           onBack={goToRoleHome}
           onConsultationComplete={() => {}}
         />
       )}
-      {screen === "sync" && <PendingSyncScreen lang={ashaLang} onBack={goToRoleHome} />}
-      {screen === "notifications" && (
-        <NotificationsScreen lang={ashaLang} onBack={goToRoleHome} />
+      {activeScreen === "sync" && <PendingSyncScreen lang={ashaLang} onBack={goToRoleHome} />}
+      {activeScreen === "notifications" && (
+        <NotificationsScreen
+          lang={role === "doctor" ? "en" : ashaLang}
+          role={role}
+          onBack={goToRoleHome}
+        />
       )}
-      {screen === "profile" && (
+      {activeScreen === "profile" && (
         <ProfileScreen
-          lang={ashaLang}
+          role={role}
+          user={getAuthUser()}
+          lang={role === "doctor" ? "en" : ashaLang}
           onLangChange={setAshaLang}
           onBack={goToRoleHome}
           onLogout={() => {
+            const currentRole = role
             clearAuthSession()
-            setRole("asha")
-            setScreen("login")
+            setRole(currentRole || null)
+            setScreen(currentRole === "patient" ? "patient-login" : "login")
           }}
         />
       )}
-      {screen === "sos" && <EmergencySOSScreen lang={ashaLang} onBack={goToRoleHome} />}
-      {screen === "inventory" && (
+      {activeScreen === "sos" && <EmergencySOSScreen lang={ashaLang} onBack={goToRoleHome} />}
+      {activeScreen === "inventory" && (
         <MedicineInventoryScreen lang={ashaLang} onBack={goToRoleHome} />
       )}
-      {screen === "mch" && (
-        <MaternalChildHealthScreen lang={ashaLang} onBack={goToRoleHome} />
+      {activeScreen === "mch" && (
+        <MaternalChildHealthScreen lang={role === "doctor" ? "en" : ashaLang} onBack={goToRoleHome} />
       )}
     </>
   )

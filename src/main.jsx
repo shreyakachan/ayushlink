@@ -1,19 +1,39 @@
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
-import { registerSW } from "virtual:pwa-register"
 import App from "./App.jsx"
+import ErrorBoundary from "./components/ErrorBoundary.jsx"
 import "./index.css"
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )
 
-// Register the service worker that precaches the app shell (HTML, JS, CSS,
-// icons) so AyushLink loads instantly and works with no network connection.
-// `autoUpdate` means a new build is fetched quietly in the background and
-// swapped in on the next load — no user prompt needed.
-if ("serviceWorker" in navigator) {
-  registerSW({ immediate: true })
+// In development, unregister any active Service Workers and clear caches so
+// Vite HMR and dynamic module updates work instantly without stale cache / blank screens.
+if (import.meta.env.DEV) {
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (const registration of registrations) {
+        registration.unregister().catch(() => {})
+      }
+    }).catch(() => {})
+  }
+  if ("caches" in window) {
+    caches.keys().then((keys) => {
+      for (const key of keys) {
+        caches.delete(key).catch(() => {})
+      }
+    }).catch(() => {})
+  }
+} else if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  // Register the PWA service worker in production builds only
+  import("virtual:pwa-register")
+    .then(({ registerSW }) => {
+      registerSW({ immediate: true })
+    })
+    .catch(() => {})
 }

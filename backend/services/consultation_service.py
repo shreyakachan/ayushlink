@@ -396,8 +396,8 @@ async def submit_doctor_consultation(
         ins_res = await consultations_col.insert_one(cons_doc)
         cons_doc["_id"] = ins_res.inserted_id
 
-    # If medicines are prescribed, create digital prescription record
-    if medicines_dicts and prescriptions_col is not None:
+    # If medicines, advice, or notes are provided, create digital prescription record
+    if (medicines_dicts or data.advice or data.notes) and prescriptions_col is not None:
         rx_id = f"RX-{random.randint(1000, 9999)}"
         rx_doc = {
             "prescription_id": rx_id,
@@ -408,7 +408,9 @@ async def submit_doctor_consultation(
             "doctor_name": doc_name,
             "diagnosis": data.diagnosis,
             "medicines": medicines_dicts,
+            "advice": data.advice,
             "instructions": data.advice or data.notes,
+            "notes": data.notes,
             "date": cons_time,
             "status": "active",
             "consultation_id": consultation_id,
@@ -417,10 +419,23 @@ async def submit_doctor_consultation(
         }
         await prescriptions_col.insert_one(rx_doc)
 
+        # Trigger in-app notification for patient
+        try:
+            from services.notification_service import create_prescription_notification
+            await create_prescription_notification(
+                patient_id=target_pid,
+                doctor_name=doc_name,
+                prescription_id=rx_id,
+                consultation_id=consultation_id,
+                doctor_id=doc_id,
+            )
+        except Exception as e:
+            pass
+
     # Update doctor statistics
     if doctors_col is not None and doc_id:
         inc_fields = {"stats.consultations_completed": 1}
-        if medicines_dicts:
+        if medicines_dicts or data.advice:
             inc_fields["stats.prescriptions_signed"] = 1
         await doctors_col.update_one(
             {"$or": [{"doctor_id": doc_id}, {"phone": current_doctor.get("phone")}]},
