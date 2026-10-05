@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { ashaT } from "../lib/ashaI18n.js"
 import { syncBatch } from "../lib/api.js"
-import { getPendingItems, syncPendingQueue } from "../lib/offlineDb.js"
+import { getPendingItems, syncPendingQueue, markItemSynced, deleteOfflineItem } from "../lib/offlineDb.js"
 
 /**
  * AyushLink — Pending Sync
@@ -10,65 +10,23 @@ import { getPendingItems, syncPendingQueue } from "../lib/offlineDb.js"
  * server. Connects directly to native IndexedDB and FastAPI sync API.
  */
 
-const SEED_QUEUE = []
-
 function itemToSyncPayload(item) {
   if (item.raw) {
     return {
-      client_id: item.raw.client_id,
+      client_id: item.raw.client_id || item.id,
       type: item.raw.type,
-      client_created_at: item.raw.client_created_at,
-      payload: item.raw.payload,
+      client_created_at: item.raw.client_created_at || new Date().toISOString(),
+      payload: item.raw.payload || {},
     }
   }
-  const typeMap = {
-    "New patient": "new_patient",
-    "Prescription": "consultation_request",
-    "Vitals update": "vitals_update",
-    "AI assessment": "symptom_report",
-  }
-  const type = typeMap[item.type] || "symptom_report"
-  const labelParts = (item.label || "").split("—").map((s) => s.trim())
-  const nameOrTitle = labelParts[0] || "Patient"
-  const villageOrDetail = labelParts[1] || "Chandapur"
-
-  let payload = {}
-  if (type === "new_patient") {
-    payload = {
-      full_name: nameOrTitle,
-      phone: `98230${Math.floor(10000 + Math.random() * 90000)}`,
-      age: 32,
-      gender: "female",
-      village: villageOrDetail,
-    }
-  } else if (type === "vitals_update") {
-    payload = {
-      patient_id: nameOrTitle,
-      vitals_label: villageOrDetail,
-      blood_group: "B+",
-    }
-  } else if (type === "consultation_request") {
-    payload = {
-      patient_id: villageOrDetail || nameOrTitle,
-      reason: item.label,
-      urgency: "routine",
-    }
-  } else {
-    payload = {
-      patient_id: nameOrTitle,
-      symptoms: [villageOrDetail || nameOrTitle],
-      description: item.label,
-      severity: "moderate",
-    }
-  }
-
   return {
     client_id: item.id,
-    type,
-    client_created_at: new Date().toISOString(),
-    payload,
+    type: item.type || "symptom_report",
+    client_created_at: item.client_created_at || new Date().toISOString(),
+    payload: item.payload || {},
   }
 }
+
 
 const TYPE_META = {
   "New patient": { tone: "bg-sky-50 text-sky-600" },
@@ -130,52 +88,76 @@ export default function PendingSyncScreen({ lang = "en", onBack }) {
   const [justSynced, setJustSynced] = useState(false)
   const t = ashaT(lang)
 
-  useEffect(() => {
-    async function loadOfflineQueue() {
-      try {
-        const pending = await getPendingItems()
-        if (Array.isArray(pending) && pending.length > 0) {
-          const formatted = pending.map((item) => {
-            const p = item.payload || {}
-            return {
-              id: item.client_id,
-              type: item.type === "new_patient" ? "New patient" : item.type === "vitals_update" ? "Vitals update" : item.type === "consultation_request" ? "Prescription" : "AI assessment",
-              label: p.full_name ? `${p.full_name} — ${p.village || "Chandapur"}` : (p.description || p.reason || p.vitals_label || "Offline Record"),
-              time: "Pending sync",
-              size: "0.8 KB",
-              raw: item,
-            }
-          })
-          setQueue(formatted)
-        } else {
-          setQueue([])
-        }
-      } catch {
+  const loadOfflineQueue = useCallback(async () => {
+    try {
+      const pending = await getPendingItems()
+      if (Array.isArray(pending) && pending.length > 0) {
+        const formatted = pending.map((item) => {
+          const p = item.payload || {}
+          return {
+            id: item.client_id,
+            type:
+              item.type === "new_patient"
+                ? "New patient"
+                : item.type === "vitals_update"
+                ? "Vitals update"
+                : item.type === "consultation_request"
+                ? "Prescription"
+                : "AI assessment",
+            label: p.full_name
+              ? `${p.full_name} — ${p.village || "Chandapur"}`
+              : p.description || p.reason || p.vitals_label || "Offline Record",
+            time: "Pending sync",
+            size: "0.8 KB",
+            raw: item,
+          }
+        })
+        setQueue(formatted)
+      } else {
         setQueue([])
       }
+    } catch {
+      setQueue([])
     }
+  }, [])
+
+  useEffect(() => {
     loadOfflineQueue()
     window.addEventListener("ayushlink:pending_updated", loadOfflineQueue)
     return () => window.removeEventListener("ayushlink:pending_updated", loadOfflineQueue)
-  }, [])
+  }, [loadOfflineQueue])
 
   const syncAll = async () => {
     if (!queue.length || syncing) return
     setSyncing(true)
     setJustSynced(false)
     try {
+      let syncRes
       if (queue.some((i) => i.raw)) {
-        await syncPendingQueue()
+        syncRes = await syncPendingQueue()
       } else {
-        await syncBatch(queue.map(itemToSyncPayload))
+        syncRes = await syncBatch(queue.map(itemToSyncPayload))
+        if (syncRes && Array.isArray(syncRes.results)) {
+          for (const res of syncRes.results) {
+            if (res.status === "synced" || res.status === "already_synced") {
+              await markItemSynced(res.client_id, res)
+            }
+          }
+          window.dispatchEvent(new CustomEvent("ayushlink:sync_complete", { detail: syncRes }))
+          window.dispatchEvent(new CustomEvent("ayushlink:pending_updated"))
+        }
       }
-      setQueue([])
+
+      await loadOfflineQueue()
+
+      if (syncRes && (syncRes.synced_count > 0 || syncRes.already_synced_count > 0)) {
+        setJustSynced(true)
+        setTimeout(() => setJustSynced(false), 3500)
+      }
     } catch (e) {
       console.error("Sync failed", e)
     } finally {
       setSyncing(false)
-      setJustSynced(true)
-      setTimeout(() => setJustSynced(false), 3500)
     }
   }
 
@@ -184,15 +166,32 @@ export default function PendingSyncScreen({ lang = "en", onBack }) {
     setSyncingIds((ids) => [...ids, id])
     try {
       const item = queue.find((i) => i.id === id)
-      if (item) await syncBatch([itemToSyncPayload(item)])
-      setQueue((q) => q.filter((item) => item.id !== id))
+      if (item) {
+        const payload = itemToSyncPayload(item)
+        const syncRes = await syncBatch([payload])
+        if (syncRes && Array.isArray(syncRes.results)) {
+          const res = syncRes.results.find((r) => r.client_id === id) || syncRes.results[0]
+          if (res && (res.status === "synced" || res.status === "already_synced")) {
+            await markItemSynced(id, res)
+            setQueue((q) => q.filter((entry) => entry.id !== id))
+            window.dispatchEvent(new CustomEvent("ayushlink:sync_complete", { detail: syncRes }))
+            window.dispatchEvent(new CustomEvent("ayushlink:pending_updated"))
+          } else {
+            console.warn("Single item sync returned error status:", res?.error || res?.message)
+          }
+        }
+      }
     } catch (e) {
-      console.error("Sync failed", e)
+      console.error("Sync failed for item:", id, e)
+    } finally {
+      setSyncingIds((ids) => ids.filter((i) => i !== id))
     }
-    setSyncingIds((ids) => ids.filter((i) => i !== id))
   }
 
-  const remove = (id) => {
+  const remove = async (id) => {
+    try {
+      await deleteOfflineItem(id)
+    } catch {}
     setQueue((q) => q.filter((item) => item.id !== id))
   }
 

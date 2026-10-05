@@ -71,6 +71,10 @@ export default function PatientPrescriptionScreen({ prescription: initialPrescri
 
   useEffect(() => {
     async function loadRx() {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        setLoading(false)
+        return
+      }
       try {
         setLoading(true)
         const rxList = await getPatientPrescriptions()

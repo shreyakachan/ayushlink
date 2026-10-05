@@ -231,9 +231,8 @@ async def get_doctor_patient_cases(current_doctor: dict) -> List[DoctorPatientCa
             continue
 
         latest_symptom = recent_symptoms[0]
-        condition_val = p_doc.get("condition") or (
-            ", ".join(latest_symptom.symptoms) if latest_symptom.symptoms else latest_symptom.description[:40]
-        )
+        latest_summary = ", ".join(latest_symptom.symptoms) if latest_symptom.symptoms else (latest_symptom.description or "")
+        condition_val = latest_summary if latest_summary else (p_doc.get("condition") or "Consultation")
 
         cases.append(
             DoctorPatientCaseResponse(

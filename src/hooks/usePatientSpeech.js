@@ -69,7 +69,11 @@ export default function usePatientSpeech(lang = "en") {
     setSupported(typeof window !== "undefined" && "speechSynthesis" in window)
     return () => {
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel()
+        setTimeout(() => {
+          try {
+            window.speechSynthesis.cancel()
+          } catch {}
+        }, 0)
       }
     }
   }, [])
@@ -97,7 +101,13 @@ export default function usePatientSpeech(lang = "en") {
   // speaking about a screen that's no longer visible.
   useEffect(() => {
     return () => {
-      if (supported) window.speechSynthesis.cancel()
+      if (supported && typeof window !== "undefined" && "speechSynthesis" in window) {
+        setTimeout(() => {
+          try {
+            window.speechSynthesis.cancel()
+          } catch {}
+        }, 0)
+      }
       if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current)
     }
   }, [lang, supported])

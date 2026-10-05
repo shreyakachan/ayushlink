@@ -49,7 +49,7 @@ async def run_tests():
     symptoms_col = get_collection(COLLECTION_SYMPTOMS)
     asha_col = get_collection(COLLECTION_ASHA_WORKERS)
 
-    phone_patient = "9823099991"
+    phone_patient = "9999900055"
     phone_asha = "9823088881"
 
     # Clean previous test entries
@@ -62,7 +62,7 @@ async def run_tests():
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         # 1. Register a fresh test patient
         patient_reg_payload = {
-            "full_name": "Radha Sharma",
+            "full_name": "Test Workflow Patient",
             "phone": phone_patient,
             "password": "Password123",
             "age": 28,
@@ -150,9 +150,9 @@ async def run_tests():
         cases_res = await client.get("/api/asha/cases", headers=asha_headers)
         if cases_res.status_code == 200:
             cases = cases_res.json()
-            radha_case = next((c for c in cases if c.get("patient_id") == patient_id), None)
-            if radha_case and "Fever" in str(radha_case.get("symptoms")):
-                record("7. ASHA Dashboard Cases Feed Reflects Submission", "PASS", 200, f"Radha Sharma case found: symptoms={radha_case.get('symptoms')}, village={radha_case.get('village')}")
+            test_case = next((c for c in cases if c.get("patient_id") == patient_id), None)
+            if test_case and "Fever" in str(test_case.get("symptoms")):
+                record("7. ASHA Dashboard Cases Feed Reflects Submission", "PASS", 200, f"Test case found: symptoms={test_case.get('symptoms')}, village={test_case.get('village')}")
             else:
                 record("7. ASHA Dashboard Cases Feed Reflects Submission", "FAIL", 200, f"Case not found in feed: {cases}")
         else:
@@ -178,6 +178,14 @@ async def run_tests():
             record("9. Unauthorized Access Rejection (No JWT)", "PASS", 401, "Protected endpoints correctly reject unauthenticated requests")
         else:
             record("9. Unauthorized Access Rejection (No JWT)", "FAIL", unauth_cases.status_code, "Failed to reject unauthorized request")
+
+        # Cleanup test entries
+        if patients_col is not None:
+            await patients_col.delete_many({"phone": phone_patient})
+        if symptoms_col is not None:
+            await symptoms_col.delete_many({"patient_id": patient_id})
+        if asha_col is not None:
+            await asha_col.delete_many({"phone": phone_asha})
 
     await close_mongo_connection()
 

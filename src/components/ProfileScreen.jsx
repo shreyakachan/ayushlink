@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { ASHA_LANGUAGES, ashaT } from "../lib/ashaI18n.js"
 import { getAuthUser, getAuthRole, getDoctorProfile } from "../lib/api.js"
+import useOnlineStatus from "../hooks/useOnlineStatus.js"
 
 /**
  * AyushLink — Profile
@@ -9,12 +10,6 @@ import { getAuthUser, getAuthRole, getDoctorProfile } from "../lib/api.js"
  * Dynamically resolves authenticated doctor / health worker identity.
  */
 
-const RAW_STATS = [
-  { key: "patientsSeen", defaultLabel: "Patients seen", value: "1,284" },
-  { key: "prescriptionsIssued", defaultLabel: "Prescriptions issued", value: "342" },
-  { key: "villagesCovered", defaultLabel: "Villages covered", value: "3" },
-  { key: "monthsActive", defaultLabel: "Months active", value: "14" },
-]
 
 function getInitials(name, isDoctor) {
   if (!name) return isDoctor ? "DR" : "AW"
@@ -71,6 +66,16 @@ function BellIcon({ className }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
       <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  )
+}
+function WifiIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+      <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+      <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+      <path d="M12 20h.01" />
     </svg>
   )
 }
@@ -159,7 +164,8 @@ export default function ProfileScreen({
   user = null,
   role = null,
 }) {
-  const [toggles, setToggles] = useState({ notifications: true, offline: true })
+  const isOnline = useOnlineStatus()
+  const [toggles, setToggles] = useState({ notifications: true })
   const [showLangModal, setShowLangModal] = useState(false)
   const t = ashaT(lang)
 
@@ -267,17 +273,31 @@ export default function ProfileScreen({
           value:
             profileUser.stats?.months_active !== undefined
               ? String(profileUser.stats.months_active)
-              : "14",
+              : "0",
         },
       ]
-    : RAW_STATS.map((s) => ({
-        key: s.key,
-        label: t.profile?.stats?.[s.key] || s.defaultLabel,
-        value:
-          profileUser.stats?.[s.key] !== undefined
-            ? String(profileUser.stats[s.key])
-            : s.value,
-      }))
+    : [
+        {
+          key: "patientsSeen",
+          label: t.profile?.stats?.patientsSeen || "Patients seen",
+          value: String(profileUser.stats?.patients_seen ?? profileUser.stats?.patientsSeen ?? 0),
+        },
+        {
+          key: "prescriptionsIssued",
+          label: t.profile?.stats?.prescriptionsIssued || "Prescriptions issued",
+          value: String(profileUser.stats?.prescriptions_issued ?? profileUser.stats?.prescriptionsIssued ?? 0),
+        },
+        {
+          key: "villagesCovered",
+          label: t.profile?.stats?.villagesCovered || "Villages covered",
+          value: String(profileUser.assigned_villages?.length ?? profileUser.stats?.villages_covered ?? 0),
+        },
+        {
+          key: "monthsActive",
+          label: t.profile?.stats?.monthsActive || "Months active",
+          value: String(profileUser.stats?.months_active ?? profileUser.stats?.monthsActive ?? 1),
+        },
+      ]
 
   const credentialsDesc = isDoctor
     ? (profileUser.doctor_id
@@ -323,17 +343,21 @@ export default function ProfileScreen({
           onClick: () => setShowLangModal(true),
         },
         {
+          id: "network",
+          label: t.dashboard?.networkStatus || t.profile?.items?.networkStatus || "Network status",
+          desc: isOnline
+            ? (t.dashboard?.allUpToDate || "Online — Live connection")
+            : (t.dashboard?.offlineSaved || "Offline — Working from saved data"),
+          Icon: isOnline ? WifiIcon : OfflineIcon,
+          statusBadge: isOnline ? "Online" : "Offline",
+          statusBadgeColor: isOnline ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700",
+          toggle: false,
+        },
+        {
           id: "notifications",
           label: t.profile?.items?.notifications || "Push notifications",
           desc: t.profile?.items?.notificationsDesc || "Alerts & updates",
           Icon: BellIcon,
-          toggle: true,
-        },
-        {
-          id: "offline",
-          label: t.profile?.items?.offline || "Offline-first mode",
-          desc: t.profile?.items?.offlineDesc || "Local caching enabled",
-          Icon: OfflineIcon,
           toggle: true,
         },
       ],
@@ -426,11 +450,16 @@ export default function ProfileScreen({
                       <p className="text-sm font-semibold text-slate-800">{item.label}</p>
                       <p className="truncate text-xs text-slate-500">{item.desc}</p>
                     </div>
-                    {item.toggle ? (
+                    {item.statusBadge ? (
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${item.statusBadgeColor || "bg-emerald-50 text-emerald-700"}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${item.statusBadge === "Online" ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+                        {item.statusBadge}
+                      </span>
+                    ) : item.toggle ? (
                       <Toggle checked={!!toggles[item.id]} onChange={() => toggle(item.id)} />
-                    ) : (
+                    ) : item.onClick ? (
                       <ChevronRightIcon className="h-5 w-5 shrink-0 text-slate-300" />
-                    )}
+                    ) : null}
                   </div>
                 ))}
               </div>

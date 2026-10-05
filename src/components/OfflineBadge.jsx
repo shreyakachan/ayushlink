@@ -44,10 +44,10 @@ export default function OfflineBadge({ lang = "en" }) {
     <div
       role="status"
       aria-live="polite"
-      className="fixed inset-x-0 top-0 z-[100] flex justify-center px-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
+      className="fixed inset-x-0 top-0 z-[100] pointer-events-none flex justify-center px-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
     >
       <div
-        className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur transition
+        className={`pointer-events-auto flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur transition
           ${
             showReconnected
               ? "border-emerald-200 bg-emerald-600/95 text-white"

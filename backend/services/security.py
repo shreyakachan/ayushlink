@@ -97,7 +97,17 @@ async def get_current_patient(
 
     phone = payload.get("phone")
     sub = payload.get("sub")
-    patient = await collection.find_one({"$or": [{"phone": phone}, {"patient_id": sub}]})
+    queries = []
+    if phone:
+        queries.append({"phone": phone})
+    if sub:
+        queries.append({"patient_id": sub})
+    if not queries:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid patient token payload.",
+        )
+    patient = await collection.find_one({"$or": queries})
     if not patient:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -125,7 +135,17 @@ async def get_current_asha_worker(
 
     phone = payload.get("phone")
     sub = payload.get("sub")
-    worker = await collection.find_one({"$or": [{"phone": phone}, {"worker_id": sub}]})
+    queries = []
+    if phone:
+        queries.append({"phone": phone})
+    if sub:
+        queries.append({"worker_id": sub})
+    if not queries:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid ASHA worker token payload.",
+        )
+    worker = await collection.find_one({"$or": queries})
     if not worker:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -153,7 +173,17 @@ async def get_current_doctor(
 
     phone = payload.get("phone")
     sub = payload.get("sub")
-    doctor = await collection.find_one({"$or": [{"phone": phone}, {"doctor_id": sub}]})
+    queries = []
+    if phone:
+        queries.append({"phone": phone})
+    if sub:
+        queries.append({"doctor_id": sub})
+    if not queries:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid doctor token payload.",
+        )
+    doctor = await collection.find_one({"$or": queries})
     if not doctor:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

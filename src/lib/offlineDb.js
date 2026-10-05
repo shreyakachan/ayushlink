@@ -112,13 +112,37 @@ export async function markItemSynced(clientId, serverResult = {}) {
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
-  } catch {}
+  } catch (err) {
+    console.warn("Failed to mark item synced in IndexedDB:", err)
+  }
+}
+
+/**
+ * Remove an item from the offline queue in IndexedDB.
+ */
+export async function deleteOfflineItem(clientId) {
+  try {
+    const db = await openDB()
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_PENDING, "readwrite")
+      tx.objectStore(STORE_PENDING).delete(clientId)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    window.dispatchEvent(new CustomEvent("ayushlink:pending_updated"))
+  } catch (err) {
+    console.warn("Failed to delete offline item in IndexedDB:", err)
+  }
 }
 
 /**
  * Synchronize all pending items in the offline queue with the backend.
  */
 export async function syncPendingQueue() {
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    return { total_items: 0, synced_count: 0 }
+  }
+
   const token = getAuthToken()
   if (!token) return { total_items: 0, synced_count: 0 }
 

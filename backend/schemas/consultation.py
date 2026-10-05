@@ -13,6 +13,7 @@ class ConsultationCreateRequest(BaseModel):
     urgency: str = Field(default="routine", description="Urgency: routine | urgent | emergency")
     notes: Optional[str] = Field(default=None, max_length=2000, description="Additional notes or context")
     preferred_time: Optional[datetime] = Field(default=None, description="Optional preferred consultation date/time")
+    offline_id: Optional[str] = Field(default=None, description="Optional offline or client-generated idempotency key")
 
 
 class ConsultationDecisionRequest(BaseModel):
@@ -60,6 +61,8 @@ class ConsultationResponse(BaseModel):
     medicines: List[MedicineItemSchema] = []
     requested_by: Optional[str] = "patient"
     call_session: Dict[str, Any] = Field(default_factory=dict)
+    offline_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
 

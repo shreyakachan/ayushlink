@@ -16,6 +16,9 @@ export default function PatientMedicinesScreen({ medicines: propMeds, lang = "en
 
   useEffect(() => {
     async function loadMedicines() {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        return
+      }
       try {
         const rxList = await getPatientPrescriptions()
         if (Array.isArray(rxList) && rxList.length > 0) {

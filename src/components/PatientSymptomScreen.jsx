@@ -133,11 +133,8 @@ export default function PatientSymptomScreen({ lang = "en", onBack }) {
       client_created_at: nowIso,
     }
 
-    try {
-      await submitPatientSymptoms(symptomPayload)
-      setSubmitState("success")
-    } catch (err) {
-      // Offline fallback: save to IndexedDB pending queue
+    // PATH A: If browser is offline, save to IndexedDB pending queue immediately and do not attempt network request
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
       const authUser = getAuthUser()
       await saveOfflineItem({
         type: "symptom_report",
@@ -146,6 +143,29 @@ export default function PatientSymptomScreen({ lang = "en", onBack }) {
         payload: {
           ...symptomPayload,
           patient_id: authUser?.patient_id || authUser?.sub || "self",
+          patient_name: authUser?.full_name || authUser?.name || "Patient",
+          village: authUser?.village || "Chandapur",
+        },
+      })
+      setSubmitState("success")
+      return
+    }
+
+    // PATH B: Attempt live API submission with offline fallback on network/backend failure
+    try {
+      await submitPatientSymptoms(symptomPayload)
+      setSubmitState("success")
+    } catch (err) {
+      const authUser = getAuthUser()
+      await saveOfflineItem({
+        type: "symptom_report",
+        client_id: offlineId,
+        client_created_at: nowIso,
+        payload: {
+          ...symptomPayload,
+          patient_id: authUser?.patient_id || authUser?.sub || "self",
+          patient_name: authUser?.full_name || authUser?.name || "Patient",
+          village: authUser?.village || "Chandapur",
         },
       })
       setSubmitState("success")

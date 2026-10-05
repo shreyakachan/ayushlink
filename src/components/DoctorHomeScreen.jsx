@@ -7,6 +7,7 @@ import {
   getPatientMedicalRecord,
   getDoctorVideoRequests,
   decideConsultation,
+  getDoctorNotifications,
 } from "../lib/api.js"
 import DoctorVideoCallModal from "./DoctorVideoCallModal.jsx"
 
@@ -71,6 +72,7 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
   const [queueFilter, setQueueFilter] = useState("all")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(true)
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0)
 
   const [doctorProfile, setDoctorProfile] = useState(() => {
     const auth = getAuthUser()
@@ -99,11 +101,12 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
           })
         }
 
-        // 1. Fetch live patient consultation cases from MongoDB
-        const [cases, ashas, vRequests] = await Promise.allSettled([
+        // 1. Fetch live patient consultation cases, ASHA workers, video requests, and unread notifications from MongoDB
+        const [cases, ashas, vRequests, notifs] = await Promise.allSettled([
           getDoctorCases(),
           getAshaWorkersList(),
           getDoctorVideoRequests(),
+          getDoctorNotifications(),
         ])
 
         if (!isMounted) return
@@ -112,6 +115,10 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
           const liveQueue = cases.value.map((c, idx) => {
             const rawStatus = (c.status || "pending").toLowerCase()
             const rawUrgency = (c.urgency || (rawStatus === "urgent" || rawStatus === "critical" ? "urgent" : "normal")).toLowerCase()
+            const latestSymptom = c.recent_symptoms?.[0]
+            const currentReason = latestSymptom
+              ? (latestSymptom.symptoms?.length ? latestSymptom.symptoms.join(", ") : latestSymptom.description)
+              : (c.condition || "Consultation Request")
             return {
               id: c.patient_id || `P-${4550 + idx}`,
               name: formatPatientName(c.full_name || "Patient"),
@@ -119,9 +126,7 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
               age: c.age || 28,
               gender: c.gender ? c.gender.charAt(0).toUpperCase() + c.gender.slice(1) : "Female",
               symptoms: c.recent_symptoms || [],
-              reason: c.recent_symptoms?.length
-                ? c.recent_symptoms.map((s) => s.symptoms?.join(", ") || s.description).join("; ")
-                : (c.condition || "Consultation Request"),
+              reason: currentReason,
               waiting: c.waiting_time || `${Math.max(2, (idx + 1) * 4)} min ago`,
               status: rawStatus === "critical" || rawStatus === "urgent" ? "urgent" : rawStatus,
               urgency: rawUrgency,
@@ -140,6 +145,11 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
         if (vRequests.status === "fulfilled" && Array.isArray(vRequests.value)) {
           setVideoRequests(vRequests.value.filter((r) => r.status === "requested" || r.status === "accepted"))
         }
+
+        if (notifs.status === "fulfilled" && Array.isArray(notifs.value)) {
+          const unread = notifs.value.filter((n) => !n.is_read).length
+          setUnreadNotifsCount(unread)
+        }
       } catch (err) {
         console.error("Doctor dashboard load error:", err)
         if (isMounted) setQueue([])
@@ -149,12 +159,19 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
     }
     loadDashboardData()
 
-    // Polling for incoming video consultation requests every 3.5s
+    // Polling for incoming video consultation requests and unread notifications every 3.5s
     const pollId = setInterval(async () => {
       try {
-        const vReqs = await getDoctorVideoRequests()
+        const [vReqs, notifs] = await Promise.all([
+          getDoctorVideoRequests().catch(() => null),
+          getDoctorNotifications().catch(() => null),
+        ])
         if (isMounted && Array.isArray(vReqs)) {
           setVideoRequests(vReqs.filter((r) => r.status === "requested" || r.status === "accepted"))
+        }
+        if (isMounted && Array.isArray(notifs)) {
+          const unread = notifs.filter((n) => !n.is_read).length
+          setUnreadNotifsCount(unread)
         }
       } catch {}
     }, 3500)
@@ -298,7 +315,7 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
     { id: "consultations", label: "Consultations", Icon: StethoscopeIcon },
     { id: "asha-workers", label: "ASHA Workers", Icon: UsersRoundIcon },
     { id: "mch", label: "Maternal & Child", Icon: MchIcon },
-    { id: "notifications", label: "Notifications", Icon: BellIcon, badge: stats.pending > 0 ? stats.pending : null },
+    { id: "notifications", label: "Notifications", Icon: BellIcon, badge: unreadNotifsCount > 0 ? unreadNotifsCount : null },
     { id: "sync", label: "Pending Sync", Icon: SyncIcon },
     { id: "profile", label: "Profile", Icon: UserIcon },
   ]
@@ -339,7 +356,7 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
       desc: "View recent alerts",
       Icon: BellIcon,
       tone: "blue",
-      count: stats.pending > 0 ? stats.pending : undefined,
+      count: unreadNotifsCount > 0 ? unreadNotifsCount : undefined,
     },
     {
       id: "sync",
@@ -466,9 +483,9 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
                 aria-label="Notifications"
               >
                 <BellIcon className="h-5 w-5" />
-                {stats.pending > 0 && (
+                {unreadNotifsCount > 0 && (
                   <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm">
-                    {stats.pending}
+                    {unreadNotifsCount}
                   </span>
                 )}
               </button>
@@ -825,7 +842,7 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
             { id: "dashboard", label: "Home", Icon: LayoutGridIcon },
             { id: "patients", label: "Patients", Icon: UsersIcon },
             { id: "consultations", label: "Consult", Icon: StethoscopeIcon },
-            { id: "notifications", label: "Alerts", Icon: BellIcon, badge: stats.pending > 0 ? stats.pending : null },
+            { id: "notifications", label: "Alerts", Icon: BellIcon, badge: unreadNotifsCount > 0 ? unreadNotifsCount : null },
             { id: "profile", label: "Profile", Icon: UserIcon },
           ].map(({ id, label, Icon, badge }) => (
             <button

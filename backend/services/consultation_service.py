@@ -53,6 +53,7 @@ def doc_to_consultation_response(doc: dict) -> ConsultationResponse:
         medicines=clean_medicines,
         requested_by=doc.get("requested_by", "patient"),
         call_session=doc.get("call_session", {"room_id": None, "session_status": "idle"}),
+        offline_id=doc.get("offline_id"),
         created_at=doc.get("created_at"),
         updated_at=doc.get("updated_at"),
     )
@@ -104,15 +105,6 @@ async def create_consultation_request(
             detail="Unauthorized role to create consultation requests.",
         )
 
-    # Doctor lookup if specified
-    doctor_name = None
-    if data.doctor_id:
-        doctors_col = get_collection(COLLECTION_DOCTORS)
-        if doctors_col is not None:
-            doc_record = await doctors_col.find_one({"$or": [{"doctor_id": data.doctor_id}, {"_id": ObjectId(data.doctor_id) if ObjectId.is_valid(data.doctor_id) else None}]})
-            if doc_record:
-                doctor_name = doc_record.get("full_name")
-
     consultations_col = get_collection(COLLECTION_CONSULTATIONS)
     patients_col = get_collection(COLLECTION_PATIENTS)
 
@@ -122,13 +114,28 @@ async def create_consultation_request(
             detail="Database unavailable.",
         )
 
-    # Check if an active/pending consultation request already exists for this patient
+    # 1. Offline ID idempotency check (if offline/client ID was provided)
+    if data.offline_id:
+        existing_offline = await consultations_col.find_one({"offline_id": data.offline_id})
+        if existing_offline:
+            return doc_to_consultation_response(existing_offline)
+
+    # 2. Strict active request check: Exactly ONE active consultation request per patient
     existing_active = await consultations_col.find_one({
         "patient_id": target_pid,
         "status": {"$in": ["requested", "accepted", "in_progress"]},
     })
     if existing_active:
         return doc_to_consultation_response(existing_active)
+
+    # Doctor lookup if specified
+    doctor_name = None
+    if data.doctor_id:
+        doctors_col = get_collection(COLLECTION_DOCTORS)
+        if doctors_col is not None:
+            doc_record = await doctors_col.find_one({"$or": [{"doctor_id": data.doctor_id}, {"_id": ObjectId(data.doctor_id) if ObjectId.is_valid(data.doctor_id) else None}]})
+            if doc_record:
+                doctor_name = doc_record.get("full_name")
 
     cons_num = random.randint(1000, 9999)
     consultation_id = f"CONS-{cons_num}"
@@ -144,8 +151,9 @@ async def create_consultation_request(
 
     cons_doc = {
         "consultation_id": consultation_id,
+        "offline_id": data.offline_id,
         "patient_id": target_pid,
-        "patient_name": patient_doc.get("full_name"),
+        "patient_name": patient_doc.get("full_name") or patient_doc.get("name"),
         "patient_village": patient_doc.get("village"),
         "doctor_id": data.doctor_id,
         "doctor_name": doctor_name,

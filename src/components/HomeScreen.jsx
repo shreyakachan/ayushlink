@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import { ASHA_LANGUAGES, ashaT } from "../lib/ashaI18n.js"
 import { getAuthUser, getAshaCases } from "../lib/api.js"
 import { getPendingItems } from "../lib/offlineDb.js"
+import useOnlineStatus from "../hooks/useOnlineStatus.js"
 
 /**
  * AyushLink — Home Screen (Dashboard)
@@ -29,7 +30,7 @@ const TONES = {
 
 export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack }) {
   const [activeNav, setActiveNav] = useState("home")
-  const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true)
+  const online = useOnlineStatus()
   const [cases, setCases] = useState([])
   const [pendingCount, setPendingCount] = useState(0)
   const [workerName, setWorkerName] = useState(() => {
@@ -44,28 +45,73 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
       if (auth?.full_name || auth?.name) {
         setWorkerName(auth.full_name || auth.name)
       }
+      let liveList = []
       try {
         const liveCases = await getAshaCases()
         if (Array.isArray(liveCases)) {
-          setCases(liveCases)
+          liveList = liveCases
         }
       } catch {}
 
       try {
         const pending = await getPendingItems()
         setPendingCount(pending.length)
-      } catch {}
+
+        if (pending && pending.length > 0) {
+          const updatedCases = [...liveList]
+          for (const item of pending) {
+            if (item.type === "symptom_report" && item.payload) {
+              const p = item.payload
+              const targetPid = p.patient_id || ""
+              const existingIdx = targetPid ? updatedCases.findIndex((c) => c.patient_id === targetPid) : -1
+              const symptomSummary = p.symptoms?.length ? p.symptoms.join(", ") : (p.description || "Reported symptoms")
+              const severityVal = p.severity || "moderate"
+              const statusVal = severityVal === "severe" ? "critical" : severityVal === "moderate" ? "review" : "stable"
+
+              if (existingIdx >= 0) {
+                updatedCases[existingIdx] = {
+                  ...updatedCases[existingIdx],
+                  condition: symptomSummary,
+                  description: p.description || symptomSummary,
+                  symptoms: p.symptoms || [],
+                  severity: severityVal,
+                  status: statusVal,
+                }
+              } else {
+                updatedCases.unshift({
+                  patient_id: targetPid || "P-PENDING",
+                  patient_name: p.patient_name || (targetPid ? `Patient ${targetPid}` : "Unknown Patient"),
+                  village: p.village || "Chandapur",
+                  condition: symptomSummary,
+                  description: p.description || symptomSummary,
+                  symptoms: p.symptoms || [],
+                  severity: severityVal,
+                  status: statusVal,
+                  sync_status: "pending",
+                })
+              }
+            }
+          }
+          setCases(updatedCases)
+        } else {
+          setCases(liveList)
+        }
+      } catch {
+        setCases(liveList)
+      }
     }
     loadDashboard()
 
     const onPendingUpdated = () => {
-      getPendingItems().then((items) => setPendingCount(items.length)).catch(() => {})
+      loadDashboard()
     }
     window.addEventListener("ayushlink:pending_updated", onPendingUpdated)
     window.addEventListener("ayushlink:sync_complete", loadDashboard)
+    window.addEventListener("focus", onPendingUpdated)
     return () => {
       window.removeEventListener("ayushlink:pending_updated", onPendingUpdated)
       window.removeEventListener("ayushlink:sync_complete", loadDashboard)
+      window.removeEventListener("focus", onPendingUpdated)
     }
   }, [])
 
@@ -95,7 +141,7 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
     {
       id: "patients",
       title: t.dashboard.myPatients,
-      desc: `248 ${t.dashboard.recordsSaved}`,
+      desc: `${cases.length} ${t.dashboard.recordsSaved || "records saved"}`,
       Icon: UsersIcon,
       tone: "sky",
     },
@@ -125,10 +171,10 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
     {
       id: "sync",
       title: t.dashboard.pendingSyncTitle,
-      desc: `12 ${t.dashboard.recordsWaiting}`,
+      desc: pendingCount > 0 ? `${pendingCount} ${t.dashboard.recordsWaiting}` : (t.sync?.allCaughtUp || "All caught up"),
       Icon: SyncIcon,
       tone: "amber",
-      count: 12,
+      count: pendingCount > 0 ? pendingCount : undefined,
     },
     {
       id: "sos",
@@ -294,14 +340,13 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setOnline((v) => !v)}
-                className={`shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition
-                  ${online ? "bg-white/15 text-white hover:bg-white/25" : "bg-amber-600 text-white hover:bg-amber-700"}`}
+              <div
+                className={`shrink-0 flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold
+                  ${online ? "bg-white/20 text-white" : "bg-amber-200/80 text-amber-900"}`}
               >
-                {online ? t.dashboard.goOffline : t.dashboard.reconnect}
-              </button>
+                <span className={`h-2 w-2 rounded-full ${online ? "bg-emerald-300 animate-pulse" : "bg-amber-600"}`} />
+                {online ? (t.dashboard.onlineStatus || "Online") : (t.dashboard.offlineStatus || "Offline")}
+              </div>
             </section>
 
             {/* Incentive wallet */}
@@ -367,16 +412,16 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
                           ${
                             p.status === "critical"
                               ? "bg-red-50 text-red-600"
-                              : p.status === "review"
+                              : p.status === "review" || p.status === "waiting"
                               ? "bg-amber-50 text-amber-600"
                               : "bg-emerald-50 text-emerald-600"
                           }`}
                       >
                         {p.status === "critical"
-                          ? t.dashboard.statusCritical
-                          : p.status === "review"
-                          ? t.dashboard.statusPending
-                          : t.dashboard.statusSynced}
+                          ? (t.patients?.critical || "Critical")
+                          : p.status === "review" || p.status === "waiting"
+                          ? (t.patients?.needsReview || "Needs Review")
+                          : (t.patients?.stable || "Stable")}
                       </span>
                     </button>
                   ))}
@@ -384,8 +429,8 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
               ) : (
                 <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white/70 py-10 text-center">
                   <UsersIcon className="h-8 w-8 text-slate-300" />
-                  <p className="mt-2 text-sm font-semibold text-slate-700">No Patient Submissions Yet</p>
-                  <p className="mt-0.5 text-xs text-slate-500">Submissions from village patients will appear here automatically.</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-700">No patients assigned yet</p>
+                  <p className="mt-0.5 text-xs text-slate-500">Patients in your assigned villages will appear here automatically.</p>
                 </div>
               )}
             </section>

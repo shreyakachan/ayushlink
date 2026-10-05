@@ -166,7 +166,9 @@ async def submit_patient_symptom(
 
     if user_role == "patient":
         target_pid = current_user.get("patient_id") or str(current_user.get("_id"))
-        patient_doc = current_user
+        patient_doc = await find_patient_by_id_or_pid(target_pid)
+        if not patient_doc:
+            patient_doc = current_user
     elif user_role == "asha":
         if not target_patient_identifier:
             raise HTTPException(
@@ -191,6 +193,9 @@ async def submit_patient_symptom(
             detail="Unauthorized role.",
         )
 
+    # Resolve canonical patient name strictly from verified patient document
+    canonical_name = patient_doc.get("full_name") or patient_doc.get("name") or patient_doc.get("patient_name") or f"Patient {target_pid}"
+
     # Check idempotency if offline_id is provided
     symptoms_collection = get_collection(COLLECTION_SYMPTOMS)
     if symptoms_collection is None:
@@ -212,6 +217,7 @@ async def submit_patient_symptom(
     symptom_doc = {
         "symptom_id": symptom_id,
         "patient_id": target_pid,
+        "patient_name": canonical_name,
         "symptoms": data.symptoms,
         "description": data.description.strip(),
         "recorded_at": recorded_at,
@@ -238,6 +244,19 @@ async def submit_patient_symptom(
             {"_id": patient_doc["_id"]},
             {"$set": {"condition": summary, "status": status_val, "updated_at": now}},
         )
+
+    # Create Doctor notification for newly submitted symptom with canonical patient identity
+    symptom_summary = ", ".join(data.symptoms) if data.symptoms else data.description.strip()
+
+    from services.notification_service import create_symptom_notification
+    await create_symptom_notification(
+        patient_id=target_pid,
+        patient_name=canonical_name,
+        symptom_text=symptom_summary,
+        symptom_id=symptom_id,
+        offline_id=data.offline_id,
+        created_at=recorded_at,
+    )
 
     return doc_to_symptom_response(symptom_doc)
 

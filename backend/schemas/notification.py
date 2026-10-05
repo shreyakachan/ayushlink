@@ -11,6 +11,9 @@ class NotificationResponse(BaseModel):
     patient_name: Optional[str] = None
     prescription_id: Optional[str] = None
     consultation_id: Optional[str] = None
+    symptom_id: Optional[str] = None
+    symptom: Optional[str] = None
+    offline_id: Optional[str] = None
     doctor_id: Optional[str] = None
     doctor_name: Optional[str] = None
     title: str = Field(default="Notification")

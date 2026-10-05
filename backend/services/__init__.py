@@ -39,6 +39,7 @@ from services.sync_service import process_batch_sync
 from services.notification_service import (
     create_prescription_notification,
     create_doctor_consultation_notification,
+    create_symptom_notification,
     get_patient_notifications,
     get_doctor_notifications,
     mark_notification_read,
@@ -79,6 +80,7 @@ __all__ = [
     "process_batch_sync",
     "create_prescription_notification",
     "create_doctor_consultation_notification",
+    "create_symptom_notification",
     "get_patient_notifications",
     "get_doctor_notifications",
     "mark_notification_read",

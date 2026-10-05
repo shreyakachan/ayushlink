@@ -47,6 +47,9 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
     let isMounted = true
 
     async function loadInitialData() {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        return
+      }
       try {
         const [docsRes, activeReq] = await Promise.allSettled([
           getAvailableDoctors(),

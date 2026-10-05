@@ -4,8 +4,8 @@
  */
 
 export const API_BASE_URL =
-  import.meta.env.VITE_API_URL ||
-  (typeof window !== "undefined" && window.location?.origin
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ||
+  (typeof window !== "undefined" && window.location?.origin && window.location.origin !== "http://localhost:5173"
     ? "/api"
     : "http://127.0.0.1:8000/api")
 
@@ -13,6 +13,7 @@ export const API_BASE_URL =
 const TOKEN_KEY = "ayushlink_token"
 const USER_KEY = "ayushlink_user"
 const ROLE_KEY = "ayushlink_role"
+const ACCOUNTS_CACHE_KEY = "ayushlink_cached_accounts"
 
 export function getAuthToken() {
   try {
@@ -46,6 +47,32 @@ export function setAuthSession(token, user, role) {
     if (user) localStorage.setItem(USER_KEY, JSON.stringify(user))
     if (role) localStorage.setItem(ROLE_KEY, role)
     if (user?.patient_id) localStorage.setItem("ayushlink_current_patient_id", user.patient_id)
+
+    // Store in offline accounts cache for offline authentication reuse
+    const tokenInfo = checkTokenExpiry(token)
+    const rawPhone = user?.phone || user?.mobile || user?.phone_number || tokenInfo?.payload?.phone
+    const cleanPhone = rawPhone ? String(rawPhone).replace(/\D/g, "").slice(-10) : null
+    const userId = user?.patient_id || user?.worker_id || user?.doctor_id || user?.id || tokenInfo?.payload?.sub
+
+    if (token && user && role) {
+      const cacheRaw = localStorage.getItem(ACCOUNTS_CACHE_KEY)
+      const cache = cacheRaw ? JSON.parse(cacheRaw) : {}
+      const entry = {
+        token,
+        user,
+        role,
+        saved_at: Date.now(),
+      }
+
+      if (cleanPhone) {
+        cache[`${role}_${cleanPhone}`] = entry
+      }
+      if (userId) {
+        cache[`${role}_${String(userId).trim().toLowerCase()}`] = entry
+      }
+
+      localStorage.setItem(ACCOUNTS_CACHE_KEY, JSON.stringify(cache))
+    }
   } catch {}
 }
 
@@ -63,9 +90,104 @@ export function logoutUser() {
 }
 
 /**
+ * Validate JWT access token structure and expiration timestamp locally.
+ */
+export function checkTokenExpiry(token) {
+  if (!token || typeof token !== "string") return { valid: false, expired: true }
+  try {
+    const parts = token.split(".")
+    if (parts.length !== 3) return { valid: false, expired: true }
+    const base64Url = parts[1]
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/")
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    )
+    const payload = JSON.parse(jsonPayload)
+    if (payload.exp && payload.exp * 1000 < Date.now()) {
+      return { valid: false, expired: true, payload }
+    }
+    return { valid: true, expired: false, payload }
+  } catch {
+    return { valid: false, expired: true }
+  }
+}
+
+/**
+ * Retrieve a previously authenticated offline session for a role and phone number or ID.
+ */
+export function getOfflineCachedSession(role, phoneOrId) {
+  if (!phoneOrId) return null
+  const cleanPhone = String(phoneOrId).replace(/\D/g, "").slice(-10)
+  const cleanId = String(phoneOrId).trim().toLowerCase()
+
+  try {
+    // 1. Check multi-account cache
+    const cacheRaw = localStorage.getItem(ACCOUNTS_CACHE_KEY)
+    if (cacheRaw) {
+      const cache = JSON.parse(cacheRaw)
+
+      // Direct key match
+      if (cleanPhone && cache[`${role}_${cleanPhone}`]) {
+        const entry = cache[`${role}_${cleanPhone}`]
+        if (entry && entry.token && entry.user) return entry
+      }
+      if (cleanId && cache[`${role}_${cleanId}`]) {
+        const entry = cache[`${role}_${cleanId}`]
+        if (entry && entry.token && entry.user) return entry
+      }
+
+      // Scan all entries in cache
+      for (const [key, entry] of Object.entries(cache)) {
+        if (!entry || entry.role !== role) continue
+
+        const entryUser = entry.user || {}
+        const entryPhone = String(entryUser.phone || entryUser.mobile || "").replace(/\D/g, "").slice(-10)
+        const entryId = String(entryUser.patient_id || entryUser.worker_id || entryUser.doctor_id || entryUser.id || "").trim().toLowerCase()
+        const tokenInfo = checkTokenExpiry(entry.token)
+        const tokenSub = String(tokenInfo?.payload?.sub || "").trim().toLowerCase()
+        const tokenPhone = String(tokenInfo?.payload?.phone || "").replace(/\D/g, "").slice(-10)
+
+        if (
+          (cleanPhone && (entryPhone === cleanPhone || tokenPhone === cleanPhone)) ||
+          (cleanId && (entryId === cleanId || tokenSub === cleanId))
+        ) {
+          return entry
+        }
+      }
+    }
+
+    // 2. Check active session if matching
+    const currentRole = getAuthRole()
+    const currentUser = getAuthUser()
+    const currentToken = getAuthToken()
+    if (currentRole === role && currentUser && currentToken) {
+      const userPhone = String(currentUser.phone || currentUser.mobile || "").replace(/\D/g, "").slice(-10)
+      const userId = String(currentUser.patient_id || currentUser.worker_id || currentUser.doctor_id || currentUser.id || "").trim().toLowerCase()
+      if ((cleanPhone && userPhone === cleanPhone) || (cleanId && userId === cleanId)) {
+        return {
+          token: currentToken,
+          user: currentUser,
+          role: currentRole,
+        }
+      }
+    }
+  } catch {}
+  return null
+}
+
+/**
  * Core fetch wrapper with JSON serialization, JWT auth headers, and error handling.
  */
 export async function apiFetch(endpoint, options = {}) {
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const offlineError = new Error("Network connection unavailable (offline mode).")
+    offlineError.isOffline = true
+    throw offlineError
+  }
+
   const url = endpoint.startsWith("http") ? endpoint : `${API_BASE_URL}${endpoint}`
   const token = getAuthToken()
 
@@ -145,8 +267,32 @@ export async function apiFetch(endpoint, options = {}) {
 
 export async function loginPatient(phone, password) {
   const cleanPhone = String(phone).replace(/\D/g, "").slice(-10)
-  clearAuthSession()
 
+  // PATH A: Offline session restoration
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const session = getOfflineCachedSession("patient", cleanPhone)
+    if (!session) {
+      const offlineError = new Error("Internet connection is required for your first login.")
+      offlineError.isOffline = true
+      throw offlineError
+    }
+    const tokenCheck = checkTokenExpiry(session.token)
+    if (tokenCheck.expired) {
+      const expiredError = new Error("Your session has expired. Please connect to the internet to sign in again.")
+      expiredError.isOffline = true
+      throw expiredError
+    }
+    setAuthSession(session.token, session.user, "patient")
+    return {
+      access_token: session.token,
+      token_type: "bearer",
+      patient: session.user,
+      is_offline: true,
+      message: "Offline session restored successfully",
+    }
+  }
+
+  // PATH B: Online backend authentication
   const res = await apiFetch("/patient/login", {
     method: "POST",
     body: { phone: cleanPhone, password: password || "123456" },
@@ -158,7 +304,6 @@ export async function loginPatient(phone, password) {
 }
 
 export async function registerPatient(patientData) {
-  clearAuthSession()
   const cleanPhone = String(patientData.phone || patientData.mobile).replace(/\D/g, "").slice(-10)
   const payload = {
     full_name: patientData.full_name || patientData.fullName || "Patient",
@@ -186,8 +331,32 @@ export async function registerPatient(patientData) {
 
 export async function loginAsha(phone, password) {
   const cleanPhone = String(phone).replace(/\D/g, "").slice(-10)
-  clearAuthSession()
 
+  // PATH A: Offline session restoration
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const session = getOfflineCachedSession("asha", cleanPhone)
+    if (!session) {
+      const offlineError = new Error("Internet connection is required for your first login.")
+      offlineError.isOffline = true
+      throw offlineError
+    }
+    const tokenCheck = checkTokenExpiry(session.token)
+    if (tokenCheck.expired) {
+      const expiredError = new Error("Your session has expired. Please connect to the internet to sign in again.")
+      expiredError.isOffline = true
+      throw expiredError
+    }
+    setAuthSession(session.token, session.user, "asha")
+    return {
+      access_token: session.token,
+      token_type: "bearer",
+      asha_worker: session.user,
+      is_offline: true,
+      message: "Offline session restored successfully",
+    }
+  }
+
+  // PATH B: Online backend authentication
   const res = await apiFetch("/asha/login", {
     method: "POST",
     body: { phone: cleanPhone, password: password || "AshaPassword123" },
@@ -199,7 +368,6 @@ export async function loginAsha(phone, password) {
 }
 
 export async function registerAsha(ashaData) {
-  clearAuthSession()
   const cleanPhone = String(ashaData.phone || ashaData.mobile).replace(/\D/g, "").slice(-10)
   const payload = {
     full_name: ashaData.full_name || ashaData.fullName || "ASHA Worker",
@@ -222,8 +390,32 @@ export async function registerAsha(ashaData) {
 
 export async function loginDoctor(phone, password) {
   const cleanPhone = String(phone).replace(/\D/g, "").slice(-10)
-  clearAuthSession()
 
+  // PATH A: Offline session restoration
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const session = getOfflineCachedSession("doctor", cleanPhone)
+    if (!session) {
+      const offlineError = new Error("Internet connection is required for your first login.")
+      offlineError.isOffline = true
+      throw offlineError
+    }
+    const tokenCheck = checkTokenExpiry(session.token)
+    if (tokenCheck.expired) {
+      const expiredError = new Error("Your session has expired. Please connect to the internet to sign in again.")
+      expiredError.isOffline = true
+      throw expiredError
+    }
+    setAuthSession(session.token, session.user, "doctor")
+    return {
+      access_token: session.token,
+      token_type: "bearer",
+      doctor: session.user,
+      is_offline: true,
+      message: "Offline session restored successfully",
+    }
+  }
+
+  // PATH B: Online backend authentication
   const res = await apiFetch("/doctor/login", {
     method: "POST",
     body: { phone: cleanPhone, password: password || "DoctorSecurePass123" },
@@ -458,10 +650,26 @@ export async function getAvailableDoctors() {
    Offline Synchronization API Methods
    ========================================================================= */
 
-export async function syncBatch(items, batchId = null) {
+export async function syncBatch(itemsOrPayload, batchId = null) {
+  let payload = {}
+
+  if (itemsOrPayload && !Array.isArray(itemsOrPayload) && typeof itemsOrPayload === "object") {
+    // Style 2: syncBatch({ batch_id, items })
+    payload = {
+      batch_id: itemsOrPayload.batch_id || batchId || `BATCH-${Date.now()}`,
+      items: Array.isArray(itemsOrPayload.items) ? itemsOrPayload.items : [],
+    }
+  } else {
+    // Style 1: syncBatch(itemsArray, batchId)
+    payload = {
+      batch_id: batchId || `BATCH-${Date.now()}`,
+      items: Array.isArray(itemsOrPayload) ? itemsOrPayload : [],
+    }
+  }
+
   return await apiFetch("/sync/batch", {
     method: "POST",
-    body: { items, batch_id: batchId },
+    body: payload,
   })
 }
 

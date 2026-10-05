@@ -60,6 +60,10 @@ export default function PatientHomeScreen({
             abhaId: authUser.abha_id || p.abhaId,
           }))
         }
+        // If offline, do not block or wait for network request
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          return
+        }
         const record = await getPatientMedicalRecord()
         if (record) {
           setPatient({

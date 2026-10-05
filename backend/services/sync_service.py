@@ -140,6 +140,8 @@ async def process_batch_sync(
                     already_synced_count += 1
                 else:
                     target_pid = payload.get("patient_id") or current_user.get("patient_id") or str(current_user.get("_id"))
+                    patient_doc = await find_patient_by_id_or_pid(target_pid) if target_pid else None
+                    canonical_name = (patient_doc.get("full_name") or patient_doc.get("name") or patient_doc.get("patient_name")) if patient_doc else (payload.get("patient_name") or f"Patient {target_pid}")
                     description = payload.get("description") or payload.get("notes") or "Symptom reported offline"
                     symptoms_list = payload.get("symptoms") or []
                     if isinstance(symptoms_list, str):
@@ -150,6 +152,7 @@ async def process_batch_sync(
                         "symptom_id": symptom_id,
                         "offline_id": client_id,
                         "patient_id": target_pid,
+                        "patient_name": canonical_name,
                         "symptoms": symptoms_list,
                         "description": description.strip(),
                         "recorded_at": client_time,
@@ -163,6 +166,28 @@ async def process_batch_sync(
                         "updated_at": datetime.now(timezone.utc),
                     }
                     await symptoms_col.insert_one(symptom_doc)
+
+                    # Create Doctor notification for newly synced symptom
+                    symptom_summary = ", ".join(symptoms_list) if symptoms_list else description.strip()
+
+                    from services.notification_service import create_symptom_notification
+                    await create_symptom_notification(
+                        patient_id=target_pid,
+                        patient_name=canonical_name,
+                        symptom_text=symptom_summary,
+                        symptom_id=symptom_id,
+                        offline_id=client_id,
+                        created_at=client_time,
+                    )
+
+                    # Also update patient condition summary
+                    if patients_col is not None and patient_doc:
+                        status_val = "critical" if payload.get("severity") == "severe" else "review" if payload.get("severity") == "moderate" else "stable"
+                        await patients_col.update_one(
+                            {"_id": patient_doc["_id"]},
+                            {"$set": {"condition": symptom_summary, "status": status_val, "updated_at": datetime.now(timezone.utc)}},
+                        )
+
                     results.append(SyncItemResult(
                         client_id=client_id,
                         type=item.type,
@@ -253,38 +278,58 @@ async def process_batch_sync(
                     already_synced_count += 1
                 else:
                     target_pid = payload.get("patient_id") or current_user.get("patient_id")
-                    cons_id = f"CONS-{random.randint(1000, 9999)}"
-                    cons_doc = {
-                        "consultation_id": cons_id,
-                        "offline_id": client_id,
+                    patient_doc = await find_patient_by_id_or_pid(target_pid) if target_pid else None
+                    canonical_name = (patient_doc.get("full_name") or patient_doc.get("name")) if patient_doc else (payload.get("patient_name") or f"Patient {target_pid}")
+                    village = (patient_doc.get("village") if patient_doc else None) or payload.get("village")
+
+                    # Check if an active/pending consultation already exists for this patient
+                    existing_active = await cons_col.find_one({
                         "patient_id": target_pid,
-                        "patient_name": payload.get("patient_name"),
-                        "patient_village": payload.get("village"),
-                        "doctor_id": payload.get("doctor_id"),
-                        "date_time": client_time,
-                        "status": "requested",
-                        "urgency": payload.get("urgency", "routine"),
-                        "reason": payload.get("reason", "Offline consultation request"),
-                        "symptoms": payload.get("symptoms", []),
-                        "notes": payload.get("notes"),
-                        "requested_by": user_role,
-                        "call_session": {
-                            "room_id": f"room_{cons_id.lower()}",
-                            "session_status": "idle",
-                            "meeting_link": f"/teleconsultation/{cons_id}",
-                        },
-                        "created_at": client_time,
-                        "updated_at": datetime.now(timezone.utc),
-                    }
-                    await cons_col.insert_one(cons_doc)
-                    results.append(SyncItemResult(
-                        client_id=client_id,
-                        type=item.type,
-                        status="synced",
-                        server_id=cons_id,
-                        message="Consultation request synchronized successfully.",
-                    ))
-                    synced_count += 1
+                        "status": {"$in": ["requested", "accepted", "in_progress"]},
+                    })
+                    if existing_active:
+                        cid = existing_active.get("consultation_id", str(existing_active["_id"]))
+                        results.append(SyncItemResult(
+                            client_id=client_id,
+                            type=item.type,
+                            status="already_synced",
+                            server_id=cid,
+                            message=f"Active consultation request already exists (ID: {cid}).",
+                        ))
+                        already_synced_count += 1
+                    else:
+                        cons_id = f"CONS-{random.randint(1000, 9999)}"
+                        cons_doc = {
+                            "consultation_id": cons_id,
+                            "offline_id": client_id,
+                            "patient_id": target_pid,
+                            "patient_name": canonical_name,
+                            "patient_village": village,
+                            "doctor_id": payload.get("doctor_id"),
+                            "date_time": client_time,
+                            "status": "requested",
+                            "urgency": payload.get("urgency", "routine"),
+                            "reason": payload.get("reason", "Offline consultation request"),
+                            "symptoms": payload.get("symptoms", []),
+                            "notes": payload.get("notes"),
+                            "requested_by": user_role,
+                            "call_session": {
+                                "room_id": f"room_{cons_id.lower()}",
+                                "session_status": "idle",
+                                "meeting_link": f"/teleconsultation/{cons_id}",
+                            },
+                            "created_at": client_time,
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                        await cons_col.insert_one(cons_doc)
+                        results.append(SyncItemResult(
+                            client_id=client_id,
+                            type=item.type,
+                            status="synced",
+                            server_id=cons_id,
+                            message="Consultation request synchronized successfully.",
+                        ))
+                        synced_count += 1
 
             # Unknown Type
             else:

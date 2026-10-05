@@ -348,14 +348,14 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew, onO
                   ? t.patients.noMatch
                   : isDoctor
                   ? "No patients have submitted symptoms yet."
-                  : t.patients.noMatch}
+                  : "No patients assigned yet"}
               </p>
               <p className="text-xs text-slate-500 max-w-xs">
                 {query || filter !== "all"
                   ? "Try adjusting your search query or filters."
                   : isDoctor
                   ? "Patients will appear here once they submit health complaints through the Patient Portal."
-                  : "No registered patients in this village."}
+                  : "Patients in your assigned villages will appear here automatically."}
               </p>
             </div>
           )}

@@ -16,6 +16,15 @@ logger = logging.getLogger("ayushlink.notifications")
 
 def doc_to_notification_response(doc: dict) -> NotificationResponse:
     """Convert MongoDB notification document to clean NotificationResponse schema."""
+    created_val = doc.get("created_at")
+    if isinstance(created_val, str):
+        try:
+            created_val = datetime.fromisoformat(created_val.replace("Z", "+00:00"))
+        except Exception:
+            created_val = datetime.now(timezone.utc)
+    elif not isinstance(created_val, datetime):
+        created_val = datetime.now(timezone.utc)
+
     return NotificationResponse(
         id=str(doc.get("_id")),
         notification_id=doc.get("notification_id") or str(doc.get("_id")),
@@ -23,13 +32,16 @@ def doc_to_notification_response(doc: dict) -> NotificationResponse:
         patient_name=doc.get("patient_name"),
         prescription_id=doc.get("prescription_id"),
         consultation_id=doc.get("consultation_id"),
+        symptom_id=doc.get("symptom_id"),
+        symptom=doc.get("symptom"),
+        offline_id=doc.get("offline_id"),
         doctor_id=doc.get("doctor_id"),
         doctor_name=doc.get("doctor_name"),
         title=doc.get("title", "New Notification"),
         message=doc.get("message", ""),
         type=doc.get("type", "prescription"),
         is_read=doc.get("is_read", False),
-        created_at=doc.get("created_at", datetime.now(timezone.utc)),
+        created_at=created_val,
     )
 
 
@@ -101,6 +113,86 @@ async def create_prescription_notification(
     insert_result = await notifications_col.insert_one(notif_doc)
     notif_doc["_id"] = insert_result.inserted_id
     logger.info(f"Notification {notification_id} created for patient {patient_id} by doctor {doc_display_name}")
+
+    return doc_to_notification_response(notif_doc)
+
+
+async def create_symptom_notification(
+    patient_id: str,
+    patient_name: Optional[str] = None,
+    symptom_text: Optional[str] = None,
+    symptom_id: Optional[str] = None,
+    offline_id: Optional[str] = None,
+    doctor_id: Optional[str] = None,
+    created_at: Optional[datetime] = None,
+) -> Optional[NotificationResponse]:
+    """
+    Create an in-app notification for Doctors when a patient submits a new symptom.
+    Guarantees idempotency and prevents duplicate notifications.
+    """
+    notifications_col = get_collection(COLLECTION_NOTIFICATIONS)
+    if notifications_col is None:
+        logger.warning("Notifications collection unavailable in MongoDB.")
+        return None
+
+    if not patient_id:
+        logger.warning("Cannot create symptom notification without a patient_id.")
+        return None
+
+    # Check for duplicate notifications using offline_id or symptom_id
+    dedup_queries = []
+    if offline_id:
+        dedup_queries.append({"offline_id": offline_id})
+    if symptom_id:
+        dedup_queries.append({"symptom_id": symptom_id})
+
+    if dedup_queries:
+        existing = await notifications_col.find_one({
+            "recipient_role": "doctor",
+            "$or": dedup_queries,
+        })
+        if existing:
+            logger.info(f"Doctor symptom notification already exists for symptom {symptom_id} / offline_id {offline_id}")
+            return doc_to_notification_response(existing)
+
+    # Format dynamic patient name and symptom
+    p_name = (patient_name or "").strip() or f"Patient {patient_id}"
+    sym_desc = (symptom_text or "").strip() or "unspecified symptoms"
+
+    title = "New Symptom Report"
+    message = f"{p_name} ({patient_id}) submitted a new symptom: {sym_desc}"
+
+    now = created_at or datetime.now(timezone.utc)
+    if isinstance(now, str):
+        try:
+            now = datetime.fromisoformat(now.replace("Z", "+00:00"))
+        except Exception:
+            now = datetime.now(timezone.utc)
+
+    notif_num = random.randint(1000, 9999)
+    notification_id = f"NOTIF-SYM-{notif_num}" if not symptom_id else f"NOTIF-{symptom_id}"
+
+    notif_doc = {
+        "notification_id": notification_id,
+        "patient_id": patient_id,
+        "patient_name": p_name,
+        "symptom_id": symptom_id,
+        "offline_id": offline_id,
+        "symptom": sym_desc,
+        "doctor_id": doctor_id,
+        "recipient_role": "doctor",
+        "recipient_id": doctor_id or "doctor",
+        "title": title,
+        "message": message,
+        "type": "new_symptom",
+        "is_read": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    insert_result = await notifications_col.insert_one(notif_doc)
+    notif_doc["_id"] = insert_result.inserted_id
+    logger.info(f"Doctor notification {notification_id} created: {message}")
 
     return doc_to_notification_response(notif_doc)
 
@@ -205,9 +297,9 @@ async def get_doctor_notifications(current_doctor: dict) -> List[NotificationRes
     if notifications_col is not None:
         cursor = notifications_col.find({
             "$or": [
-                {"doctor_id": doc_id, "recipient_role": "doctor"},
+                {"recipient_role": "doctor"},
                 {"recipient_id": doc_id},
-                {"doctor_id": doc_id, "type": "consultation_request"},
+                {"doctor_id": doc_id, "recipient_role": {"$ne": "patient"}},
             ]
         }).sort("created_at", -1)
 
@@ -219,9 +311,13 @@ async def get_doctor_notifications(current_doctor: dict) -> List[NotificationRes
                     read_override_set.add(f"NOTIF-CONS-{doc.get('consultation_id')}")
                 if doc.get("prescription_id"):
                     read_override_set.add(f"NOTIF-RX-{doc.get('prescription_id')}")
+                if doc.get("symptom_id"):
+                    read_override_set.add(f"NOTIF-SYM-{doc.get('symptom_id')}")
 
             if nid not in seen_ids and doc.get("message"):
                 seen_ids.add(nid)
+                if doc.get("symptom_id"):
+                    seen_ids.add(f"NOTIF-SYM-{doc.get('symptom_id')}")
                 results.append(doc_to_notification_response(doc))
 
     # 2. Real consultations in consultations collection
@@ -316,7 +412,7 @@ async def get_doctor_notifications(current_doctor: dict) -> List[NotificationRes
                 created_at=created_time,
             ))
 
-    # 4. Severe symptoms submitted in symptoms collection
+    # 4. Severe symptoms submitted in symptoms collection (fallback for severe records)
     if symptoms_col is not None:
         sym_cursor = symptoms_col.find({
             "$or": [
@@ -328,7 +424,7 @@ async def get_doctor_notifications(current_doctor: dict) -> List[NotificationRes
         async for sym in sym_cursor:
             sym_id = sym.get("symptom_id") or str(sym.get("_id"))
             notif_id = f"NOTIF-SYM-{sym_id}"
-            if notif_id in seen_ids:
+            if notif_id in seen_ids or sym_id in seen_ids:
                 continue
             seen_ids.add(notif_id)
 
@@ -350,8 +446,23 @@ async def get_doctor_notifications(current_doctor: dict) -> List[NotificationRes
                 created_at=created_time,
             ))
 
-    # Sort all chronologically descending
-    results.sort(key=lambda x: x.created_at, reverse=True)
+    def _safe_sort_key(n: NotificationResponse):
+        dt = n.created_at
+        if dt is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        if isinstance(dt, str):
+            try:
+                dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+            except Exception:
+                return datetime.min.replace(tzinfo=timezone.utc)
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    # Sort all chronologically descending (newest first)
+    results.sort(key=_safe_sort_key, reverse=True)
     return results
 
 
@@ -387,7 +498,7 @@ async def mark_all_doctor_notifications_read(doctor_id: str) -> bool:
     notifications_col = get_collection(COLLECTION_NOTIFICATIONS)
     if notifications_col is not None:
         await notifications_col.update_many(
-            {"$or": [{"doctor_id": doctor_id}, {"recipient_id": doctor_id}]},
+            {"$or": [{"recipient_role": "doctor"}, {"doctor_id": doctor_id}, {"recipient_id": doctor_id}]},
             {"$set": {"is_read": True, "updated_at": datetime.now(timezone.utc)}},
         )
     return True

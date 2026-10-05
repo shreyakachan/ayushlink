@@ -21,6 +21,8 @@ const TYPE_META = {
   patient: { tone: "bg-indigo-50 text-indigo-600" },
   consultation: { tone: "bg-indigo-50 text-indigo-600" },
   reminder: { tone: "bg-rose-50 text-rose-600" },
+  new_symptom: { tone: "bg-emerald-50 text-emerald-600" },
+  symptom: { tone: "bg-emerald-50 text-emerald-600" },
 }
 
 function formatNotificationGroup(dateStr) {
@@ -66,6 +68,8 @@ function transformRawNotification(n) {
     patient_name: n.patient_name,
     prescription_id: n.prescription_id,
     consultation_id: n.consultation_id,
+    symptom_id: n.symptom_id,
+    symptom: n.symptom,
     created_at: dateStr,
   }
 }
@@ -364,4 +368,6 @@ const TYPE_ICON = {
   patient: UserPlusIcon,
   consultation: StethoscopeIcon,
   reminder: CalendarIcon,
+  new_symptom: StethoscopeIcon,
+  symptom: StethoscopeIcon,
 }

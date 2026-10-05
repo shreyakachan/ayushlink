@@ -23,6 +23,9 @@ export default function PatientHealthRecordScreen({ record: initialRecord, lang 
 
   useEffect(() => {
     async function loadRecord() {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        return
+      }
       try {
         const data = await getPatientMedicalRecord()
         if (data) {

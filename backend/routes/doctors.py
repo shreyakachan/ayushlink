@@ -206,6 +206,15 @@ async def list_available_doctors():
 
 
 @router.get(
+    "/doctors/available",
+    response_model=List[DoctorResponse],
+    include_in_schema=False,
+)
+async def list_available_doctors_alias():
+    return await get_available_doctors()
+
+
+@router.get(
     "/doctor",
     response_model=List[DoctorResponse],
     include_in_schema=False,
