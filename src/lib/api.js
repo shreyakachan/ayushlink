@@ -3,11 +3,26 @@
  * Connects the PWA frontend to the FastAPI + MongoDB backend.
  */
 
-export const API_BASE_URL =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ||
-  (typeof window !== "undefined" && window.location?.origin && window.location.origin !== "http://localhost:5173"
-    ? "/api"
-    : "http://127.0.0.1:8000/api")
+export const API_BASE_URL = (() => {
+  if (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL
+  }
+  if (typeof window !== "undefined" && window.location) {
+    const { hostname, port, origin } = window.location
+    // When served via Vite dev/preview ports (e.g. 5173, 4173, 3000), relative '/api' utilizes Vite's built-in reverse proxy
+    if (port === "5173" || port === "4173" || port === "3000") {
+      return "/api"
+    }
+    // When accessed via custom LAN IP/host (e.g. 192.168.x.x or standalone PWA)
+    if (hostname && hostname !== "localhost" && hostname !== "127.0.0.1") {
+      return `http://${hostname}:8000/api`
+    }
+    if (origin && origin !== "null") {
+      return "/api"
+    }
+  }
+  return "http://127.0.0.1:8000/api"
+})()
 
 // Token & Session Storage Keys
 const TOKEN_KEY = "ayushlink_token"
@@ -180,14 +195,9 @@ export function getOfflineCachedSession(role, phoneOrId) {
 
 /**
  * Core fetch wrapper with JSON serialization, JWT auth headers, and error handling.
+ * Does NOT artificially reject requests based on navigator.onLine, allowing local-network HTTP calls to succeed offline.
  */
 export async function apiFetch(endpoint, options = {}) {
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
-    const offlineError = new Error("Network connection unavailable (offline mode).")
-    offlineError.isOffline = true
-    throw offlineError
-  }
-
   const url = endpoint.startsWith("http") ? endpoint : `${API_BASE_URL}${endpoint}`
   const token = getAuthToken()
 
@@ -268,39 +278,36 @@ export async function apiFetch(endpoint, options = {}) {
 export async function loginPatient(phone, password) {
   const cleanPhone = String(phone).replace(/\D/g, "").slice(-10)
 
-  // PATH A: Offline session restoration
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
-    const session = getOfflineCachedSession("patient", cleanPhone)
-    if (!session) {
-      const offlineError = new Error("Internet connection is required for your first login.")
-      offlineError.isOffline = true
-      throw offlineError
+  try {
+    // Attempt online/LAN backend authentication first
+    const res = await apiFetch("/patient/login", {
+      method: "POST",
+      body: { phone: cleanPhone, password: password || "123456" },
+    })
+    if (res.access_token) {
+      setAuthSession(res.access_token, res.patient, "patient")
     }
-    const tokenCheck = checkTokenExpiry(session.token)
-    if (tokenCheck.expired) {
-      const expiredError = new Error("Your session has expired. Please connect to the internet to sign in again.")
-      expiredError.isOffline = true
-      throw expiredError
+    return res
+  } catch (err) {
+    // If backend is genuinely unreachable, fallback to cached offline session
+    if (err.isOffline) {
+      const session = getOfflineCachedSession("patient", cleanPhone)
+      if (session) {
+        const tokenCheck = checkTokenExpiry(session.token)
+        if (!tokenCheck.expired) {
+          setAuthSession(session.token, session.user, "patient")
+          return {
+            access_token: session.token,
+            token_type: "bearer",
+            patient: session.user,
+            is_offline: true,
+            message: "Offline session restored successfully",
+          }
+        }
+      }
     }
-    setAuthSession(session.token, session.user, "patient")
-    return {
-      access_token: session.token,
-      token_type: "bearer",
-      patient: session.user,
-      is_offline: true,
-      message: "Offline session restored successfully",
-    }
+    throw err
   }
-
-  // PATH B: Online backend authentication
-  const res = await apiFetch("/patient/login", {
-    method: "POST",
-    body: { phone: cleanPhone, password: password || "123456" },
-  })
-  if (res.access_token) {
-    setAuthSession(res.access_token, res.patient, "patient")
-  }
-  return res
 }
 
 export async function registerPatient(patientData) {
@@ -332,39 +339,36 @@ export async function registerPatient(patientData) {
 export async function loginAsha(phone, password) {
   const cleanPhone = String(phone).replace(/\D/g, "").slice(-10)
 
-  // PATH A: Offline session restoration
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
-    const session = getOfflineCachedSession("asha", cleanPhone)
-    if (!session) {
-      const offlineError = new Error("Internet connection is required for your first login.")
-      offlineError.isOffline = true
-      throw offlineError
+  try {
+    // Attempt online/LAN backend authentication first
+    const res = await apiFetch("/asha/login", {
+      method: "POST",
+      body: { phone: cleanPhone, password: password || "AshaPassword123" },
+    })
+    if (res.access_token) {
+      setAuthSession(res.access_token, res.asha_worker, "asha")
     }
-    const tokenCheck = checkTokenExpiry(session.token)
-    if (tokenCheck.expired) {
-      const expiredError = new Error("Your session has expired. Please connect to the internet to sign in again.")
-      expiredError.isOffline = true
-      throw expiredError
+    return res
+  } catch (err) {
+    // If backend is genuinely unreachable, fallback to cached offline session
+    if (err.isOffline) {
+      const session = getOfflineCachedSession("asha", cleanPhone)
+      if (session) {
+        const tokenCheck = checkTokenExpiry(session.token)
+        if (!tokenCheck.expired) {
+          setAuthSession(session.token, session.user, "asha")
+          return {
+            access_token: session.token,
+            token_type: "bearer",
+            asha_worker: session.user,
+            is_offline: true,
+            message: "Offline session restored successfully",
+          }
+        }
+      }
     }
-    setAuthSession(session.token, session.user, "asha")
-    return {
-      access_token: session.token,
-      token_type: "bearer",
-      asha_worker: session.user,
-      is_offline: true,
-      message: "Offline session restored successfully",
-    }
+    throw err
   }
-
-  // PATH B: Online backend authentication
-  const res = await apiFetch("/asha/login", {
-    method: "POST",
-    body: { phone: cleanPhone, password: password || "AshaPassword123" },
-  })
-  if (res.access_token) {
-    setAuthSession(res.access_token, res.asha_worker, "asha")
-  }
-  return res
 }
 
 export async function registerAsha(ashaData) {
@@ -391,39 +395,36 @@ export async function registerAsha(ashaData) {
 export async function loginDoctor(phone, password) {
   const cleanPhone = String(phone).replace(/\D/g, "").slice(-10)
 
-  // PATH A: Offline session restoration
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
-    const session = getOfflineCachedSession("doctor", cleanPhone)
-    if (!session) {
-      const offlineError = new Error("Internet connection is required for your first login.")
-      offlineError.isOffline = true
-      throw offlineError
+  try {
+    // Attempt online/LAN backend authentication first
+    const res = await apiFetch("/doctor/login", {
+      method: "POST",
+      body: { phone: cleanPhone, password: password || "DoctorSecurePass123" },
+    })
+    if (res.access_token) {
+      setAuthSession(res.access_token, res.doctor, "doctor")
     }
-    const tokenCheck = checkTokenExpiry(session.token)
-    if (tokenCheck.expired) {
-      const expiredError = new Error("Your session has expired. Please connect to the internet to sign in again.")
-      expiredError.isOffline = true
-      throw expiredError
+    return res
+  } catch (err) {
+    // If backend is genuinely unreachable, fallback to cached offline session
+    if (err.isOffline) {
+      const session = getOfflineCachedSession("doctor", cleanPhone)
+      if (session) {
+        const tokenCheck = checkTokenExpiry(session.token)
+        if (!tokenCheck.expired) {
+          setAuthSession(session.token, session.user, "doctor")
+          return {
+            access_token: session.token,
+            token_type: "bearer",
+            doctor: session.user,
+            is_offline: true,
+            message: "Offline session restored successfully",
+          }
+        }
+      }
     }
-    setAuthSession(session.token, session.user, "doctor")
-    return {
-      access_token: session.token,
-      token_type: "bearer",
-      doctor: session.user,
-      is_offline: true,
-      message: "Offline session restored successfully",
-    }
+    throw err
   }
-
-  // PATH B: Online backend authentication
-  const res = await apiFetch("/doctor/login", {
-    method: "POST",
-    body: { phone: cleanPhone, password: password || "DoctorSecurePass123" },
-  })
-  if (res.access_token) {
-    setAuthSession(res.access_token, res.doctor, "doctor")
-  }
-  return res
 }
 
 export async function getDoctorProfile() {
@@ -520,6 +521,28 @@ export async function assignPatientToAsha(patientId, workerId = null) {
   return await apiFetch(`/patients/${patientId}/assign-asha`, {
     method: "POST",
     body: { worker_id: workerId },
+  })
+}
+
+/* =========================================================================
+   ASHA Worker Inventory API Methods (FastAPI + MongoDB Scoped)
+   ========================================================================= */
+
+export async function getAshaInventory() {
+  return await apiFetch("/asha/inventory")
+}
+
+export async function adjustAshaInventoryStock(itemId, delta) {
+  return await apiFetch(`/asha/inventory/${itemId}/adjust`, {
+    method: "POST",
+    body: { delta: Number(delta) },
+  })
+}
+
+export async function updateAshaInventoryItem(itemId, updateData) {
+  return await apiFetch(`/asha/inventory/${itemId}`, {
+    method: "PATCH",
+    body: updateData,
   })
 }
 
@@ -726,4 +749,68 @@ export async function markNotificationRead(notificationId, role = null) {
     method: "PATCH",
   })
 }
+
+/* =========================================================================
+   LoRa Emergency Response API Methods (Software Simulation)
+   ========================================================================= */
+
+/**
+ * Trigger an Emergency SOS alert for the currently authenticated patient.
+ * Calls POST /api/emergency/sos
+ *
+ * @param {Object} [emergencyData={}]
+ * @returns {Promise<Object>} EmergencyAlertResponse
+ */
+export async function sendEmergencySOS(emergencyData = {}) {
+  const payload = {
+    emergency_type: emergencyData.emergency_type || emergencyData.emergencyType || "general_sos",
+    emergency_notes: emergencyData.emergency_notes || emergencyData.emergencyNotes || null,
+    gps_coordinates: emergencyData.gps_coordinates || emergencyData.gpsCoordinates || null,
+    simulated_telemetry: emergencyData.simulated_telemetry || emergencyData.simulatedTelemetry || null,
+  }
+  return await apiFetch("/emergency/sos", {
+    method: "POST",
+    body: payload,
+  })
+}
+
+/**
+ * Forward a simulated LoRa RF packet to the village gateway ingest endpoint.
+ * Calls POST /api/lora/gateway/packet
+ *
+ * @param {Object} packetPayload - SimulatedLoRaPacket schema matching payload
+ * @returns {Promise<Object>} GatewayACKResponse
+ */
+export async function sendLoRaGatewayPacket(packetPayload) {
+  return await apiFetch("/lora/gateway/packet", {
+    method: "POST",
+    body: packetPayload,
+  })
+}
+
+/**
+ * Retrieve active (unresolved) emergency alerts filtered by authenticated role.
+ * Calls GET /api/emergency/alerts/active
+ *
+ * @returns {Promise<Array>} List of EmergencyAlertResponse objects
+ */
+export async function getActiveEmergencyAlerts() {
+  return await apiFetch("/emergency/alerts/active")
+}
+
+/**
+ * Update the emergency workflow progression status.
+ * Calls PATCH /api/emergency/alerts/{alert_id}/status
+ *
+ * @param {string} alertId
+ * @param {Object} updateData - Status update payload (status, asha_status, phc_status, ambulance_status, notes)
+ * @returns {Promise<Object>} Updated EmergencyAlertResponse
+ */
+export async function updateEmergencyAlertStatus(alertId, updateData) {
+  return await apiFetch(`/emergency/alerts/${alertId}/status`, {
+    method: "PATCH",
+    body: updateData,
+  })
+}
+
 

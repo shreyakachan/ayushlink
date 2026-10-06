@@ -6,6 +6,8 @@ from models.symptom import SymptomRecord
 from models.prescription import Prescription, MedicineItem
 from models.consultation import Consultation
 from models.notification import Notification
+from models.inventory import InventoryItem
+from models.emergency_alert import EmergencyAlert
 
 __all__ = [
     "MongoBaseModel",
@@ -17,4 +19,6 @@ __all__ = [
     "MedicineItem",
     "Consultation",
     "Notification",
+    "InventoryItem",
+    "EmergencyAlert",
 ]

@@ -14,6 +14,8 @@ COLLECTION_PRESCRIPTIONS = "prescriptions"
 COLLECTION_CONSULTATIONS = "consultations"
 COLLECTION_NOTIFICATIONS = "notifications"
 COLLECTION_SYNC_LOGS = "sync_logs"
+COLLECTION_INVENTORY = "inventory"
+COLLECTION_EMERGENCY_ALERTS = "emergency_alerts"
 
 
 class MongoDB:
@@ -53,6 +55,16 @@ async def init_db_indexes():
         # Notifications indexes
         await db_instance.db[COLLECTION_NOTIFICATIONS].create_index("notification_id", unique=True, sparse=True)
         await db_instance.db[COLLECTION_NOTIFICATIONS].create_index([("patient_id", 1), ("created_at", -1)])
+
+        # Inventory collection indexes
+        await db_instance.db[COLLECTION_INVENTORY].create_index([("asha_worker_id", 1), ("item_id", 1)], unique=True, sparse=True)
+        await db_instance.db[COLLECTION_INVENTORY].create_index("asha_worker_id")
+
+        # Emergency alerts collection indexes
+        await db_instance.db[COLLECTION_EMERGENCY_ALERTS].create_index("alert_id", unique=True, sparse=True)
+        await db_instance.db[COLLECTION_EMERGENCY_ALERTS].create_index("patient_id")
+        await db_instance.db[COLLECTION_EMERGENCY_ALERTS].create_index([("village", 1), ("status", 1)])
+        await db_instance.db[COLLECTION_EMERGENCY_ALERTS].create_index([("created_at", -1)])
         logger.info("MongoDB unique indexes verified successfully.")
     except Exception as e:
         logger.warning(f"Note on MongoDB index verification: {e}")

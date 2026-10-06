@@ -397,6 +397,7 @@ export default function App() {
           lang={role === "doctor" ? "en" : ashaLang}
           onLangChange={setAshaLang}
           onBack={goToRoleHome}
+          onSelect={handleSelect}
           onLogout={() => {
             const currentRole = role
             clearAuthSession()

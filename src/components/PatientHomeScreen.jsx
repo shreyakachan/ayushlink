@@ -44,7 +44,6 @@ export default function PatientHomeScreen({
     }
   })
   const [caseStatus, setCaseStatus] = useState(initialCaseStatus)
-  const [sosOpen, setSosOpen] = useState(false)
 
   useEffect(() => {
     async function loadData() {
@@ -64,6 +63,7 @@ export default function PatientHomeScreen({
         if (typeof navigator !== "undefined" && !navigator.onLine) {
           return
         }
+
         const record = await getPatientMedicalRecord()
         if (record) {
           setPatient({
@@ -177,7 +177,7 @@ export default function PatientHomeScreen({
         {/* SOS — big, unmistakable, top of screen */}
         <button
           type="button"
-          onClick={() => setSosOpen(true)}
+          onClick={() => onSelect?.("patient-sos")}
           className="flex w-full items-center gap-5 rounded-3xl bg-red-600 px-6 py-6 text-left shadow-lg shadow-red-600/30 transition hover:bg-red-700 active:scale-[0.99] sm:px-8 sm:py-8"
         >
           <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white/15 sm:h-20 sm:w-20">
@@ -206,46 +206,6 @@ export default function PatientHomeScreen({
           ))}
         </section>
       </main>
-
-      {/* SOS confirmation modal */}
-      {sosOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="sos-confirm-title"
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-6"
-        >
-          <div className="w-full max-w-sm rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl sm:p-7">
-            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-600">
-              <SosIcon className="h-7 w-7" />
-            </span>
-            <h2 id="sos-confirm-title" className="mt-4 text-center text-lg font-bold text-slate-800">
-              {t.sosConfirmTitle}
-            </h2>
-            <p className="mt-2 text-center text-sm text-slate-500">{t.sosConfirmDesc}</p>
-
-            <div className="mt-6 flex flex-col gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setSosOpen(false)
-                  onSelect?.("patient-sos")
-                }}
-                className="w-full rounded-2xl bg-red-600 py-4 text-base font-bold text-white shadow-lg shadow-red-600/25 transition hover:bg-red-700 active:scale-[0.98]"
-              >
-                {t.sosYes}
-              </button>
-              <button
-                type="button"
-                onClick={() => setSosOpen(false)}
-                className="w-full rounded-2xl border border-slate-200 bg-white py-4 text-base font-semibold text-slate-600 transition hover:bg-slate-50 active:scale-[0.98]"
-              >
-                {t.sosCancel}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <PatientListenButton text={spokenSummary} lang={lang} />
     </div>

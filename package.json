@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "backend": "python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000 --app-dir backend"
+    "backend": "python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000 --app-dir backend"
   },
   "dependencies": {
     "jsqr": "^1.4.0",

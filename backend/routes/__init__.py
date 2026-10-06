@@ -8,6 +8,8 @@ from routes.prescriptions import router as prescription_router
 from routes.consultations import router as consultation_router
 from routes.notifications import router as notification_router
 from routes.sync import router as sync_router
+from routes.inventory import router as inventory_router
+from routes.lora_emergency import router as lora_emergency_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -19,5 +21,7 @@ api_router.include_router(prescription_router)
 api_router.include_router(consultation_router)
 api_router.include_router(notification_router)
 api_router.include_router(sync_router)
+api_router.include_router(inventory_router)
+api_router.include_router(lora_emergency_router)
 
 __all__ = ["api_router"]

@@ -139,10 +139,6 @@ export async function deleteOfflineItem(clientId) {
  * Synchronize all pending items in the offline queue with the backend.
  */
 export async function syncPendingQueue() {
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
-    return { total_items: 0, synced_count: 0 }
-  }
-
   const token = getAuthToken()
   if (!token) return { total_items: 0, synced_count: 0 }
 

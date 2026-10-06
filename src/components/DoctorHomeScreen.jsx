@@ -8,6 +8,8 @@ import {
   getDoctorVideoRequests,
   decideConsultation,
   getDoctorNotifications,
+  getActiveEmergencyAlerts,
+  updateEmergencyAlertStatus,
 } from "../lib/api.js"
 import DoctorVideoCallModal from "./DoctorVideoCallModal.jsx"
 
@@ -73,6 +75,10 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(true)
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0)
+  const [activeEmergencies, setActiveEmergencies] = useState([])
+  const [updatingAlertId, setUpdatingAlertId] = useState(null)
+  const [resolvingAlertId, setResolvingAlertId] = useState(null)
+  const [resolveNotesText, setResolveNotesText] = useState("")
 
   const [doctorProfile, setDoctorProfile] = useState(() => {
     const auth = getAuthUser()
@@ -101,12 +107,13 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
           })
         }
 
-        // 1. Fetch live patient consultation cases, ASHA workers, video requests, and unread notifications from MongoDB
-        const [cases, ashas, vRequests, notifs] = await Promise.allSettled([
+        // 1. Fetch live patient consultation cases, ASHA workers, video requests, unread notifications, and active emergencies from MongoDB
+        const [cases, ashas, vRequests, notifs, emergencies] = await Promise.allSettled([
           getDoctorCases(),
           getAshaWorkersList(),
           getDoctorVideoRequests(),
           getDoctorNotifications(),
+          getActiveEmergencyAlerts(),
         ])
 
         if (!isMounted) return
@@ -150,6 +157,10 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
           const unread = notifs.value.filter((n) => !n.is_read).length
           setUnreadNotifsCount(unread)
         }
+
+        if (emergencies.status === "fulfilled" && Array.isArray(emergencies.value)) {
+          setActiveEmergencies(emergencies.value)
+        }
       } catch (err) {
         console.error("Doctor dashboard load error:", err)
         if (isMounted) setQueue([])
@@ -159,12 +170,13 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
     }
     loadDashboardData()
 
-    // Polling for incoming video consultation requests and unread notifications every 3.5s
+    // Polling for incoming video consultation requests, unread notifications, and active emergencies every 3.5s
     const pollId = setInterval(async () => {
       try {
-        const [vReqs, notifs] = await Promise.all([
+        const [vReqs, notifs, ems] = await Promise.all([
           getDoctorVideoRequests().catch(() => null),
           getDoctorNotifications().catch(() => null),
+          getActiveEmergencyAlerts().catch(() => null),
         ])
         if (isMounted && Array.isArray(vReqs)) {
           setVideoRequests(vReqs.filter((r) => r.status === "requested" || r.status === "accepted"))
@@ -172,6 +184,9 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
         if (isMounted && Array.isArray(notifs)) {
           const unread = notifs.filter((n) => !n.is_read).length
           setUnreadNotifsCount(unread)
+        }
+        if (isMounted && Array.isArray(ems)) {
+          setActiveEmergencies(ems)
         }
       } catch {}
     }, 3500)
@@ -306,6 +321,80 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
       )
     } finally {
       setAssigningId(null)
+    }
+  }
+
+  const handleAcknowledgePhc = async (alert) => {
+    setUpdatingAlertId(alert.alert_id)
+    try {
+      const updated = await updateEmergencyAlertStatus(alert.alert_id, {
+        status: "PHC_NOTIFIED",
+        phc_status: "ACKNOWLEDGED",
+        notes: "PHC Acknowledgment confirmed by Medical Officer",
+      })
+      setActiveEmergencies((prev) =>
+        prev.map((a) => (a.alert_id === alert.alert_id ? updated : a))
+      )
+    } catch (err) {
+      console.error("Failed to acknowledge PHC emergency alert:", err)
+    } finally {
+      setUpdatingAlertId(null)
+    }
+  }
+
+  const handleDispatchAmbulance = async (alert) => {
+    setUpdatingAlertId(alert.alert_id)
+    try {
+      const updated = await updateEmergencyAlertStatus(alert.alert_id, {
+        status: "AMBULANCE_DISPATCHED",
+        ambulance_status: "DISPATCHED",
+        notes: "108 Emergency Ambulance dispatched by PHC",
+      })
+      setActiveEmergencies((prev) =>
+        prev.map((a) => (a.alert_id === alert.alert_id ? updated : a))
+      )
+    } catch (err) {
+      console.error("Failed to dispatch ambulance:", err)
+    } finally {
+      setUpdatingAlertId(null)
+    }
+  }
+
+  const handleMarkPatientReached = async (alert) => {
+    setUpdatingAlertId(alert.alert_id)
+    try {
+      const updated = await updateEmergencyAlertStatus(alert.alert_id, {
+        status: "PATIENT_REACHED",
+        ambulance_status: "ARRIVED",
+        notes: "Emergency responder reached patient location",
+      })
+      setActiveEmergencies((prev) =>
+        prev.map((a) => (a.alert_id === alert.alert_id ? updated : a))
+      )
+    } catch (err) {
+      console.error("Failed to mark patient reached:", err)
+    } finally {
+      setUpdatingAlertId(null)
+    }
+  }
+
+  const handleResolveEmergency = async (alert) => {
+    setUpdatingAlertId(alert.alert_id)
+    try {
+      const notes = resolveNotesText.trim() || "Emergency successfully resolved by PHC Medical Officer."
+      const updated = await updateEmergencyAlertStatus(alert.alert_id, {
+        status: "RESOLVED",
+        notes,
+      })
+      setActiveEmergencies((prev) =>
+        prev.map((a) => (a.alert_id === alert.alert_id ? updated : a))
+      )
+      setResolvingAlertId(null)
+      setResolveNotesText("")
+    } catch (err) {
+      console.error("Failed to resolve emergency:", err)
+    } finally {
+      setUpdatingAlertId(null)
     }
   }
 
@@ -504,6 +593,249 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
           </header>
 
           <div className="flex flex-col gap-6 px-5 py-6 lg:px-8">
+            {/* Active Emergency LoRa Alerts Banner (PHC & Ambulance Response Flow) */}
+            {activeEmergencies.length > 0 && (
+              <section className="flex flex-col gap-4">
+                {activeEmergencies.map((alert) => {
+                  const isResolved = alert.status === "RESOLVED"
+                  const isUpdating = updatingAlertId === alert.alert_id
+                  const timeFormatted = alert.created_at
+                    ? new Date(alert.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                    : "Just now"
+
+                  return (
+                    <div
+                      key={alert.alert_id}
+                      className={`relative overflow-hidden rounded-3xl border-2 p-5 shadow-xl transition
+                        ${
+                          isResolved
+                            ? "border-emerald-300 bg-emerald-50/90"
+                            : "border-red-500 bg-red-50/95 shadow-red-500/15 animate-pulse-subtle"
+                        }`}
+                    >
+                      {/* Top Header */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-red-200/80 pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-600 text-white shadow-md shadow-red-600/30 animate-bounce">
+                            <SosIcon className="h-5 w-5" />
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h2 className="text-base font-extrabold tracking-tight text-red-900">
+                                🚨 EMERGENCY ALERT
+                              </h2>
+                              <span className="rounded-full bg-red-200/80 px-2 py-0.5 text-[10px] font-bold text-red-800">
+                                {alert.alert_id}
+                              </span>
+                            </div>
+                            <p className="text-[11px] font-semibold text-red-700">
+                              Triggered: {timeFormatted} &middot; Village: {alert.village}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Telemetry Tag */}
+                        <div className="flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-800 border border-red-300">
+                          <RadioTowerIcon className="h-3.5 w-3.5 text-red-600" />
+                          <span>Simulated LoRa (IN865 Band)</span>
+                        </div>
+                      </div>
+
+                      {/* Real Emergency Context Details */}
+                      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <div className="rounded-2xl bg-white/90 p-3 border border-red-100">
+                          <span className="text-[11px] font-semibold text-slate-500">Patient</span>
+                          <p className="text-sm font-bold text-slate-900 truncate">{alert.patient_name}</p>
+                          {alert.patient_id && (
+                            <span className="text-[10px] font-mono text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
+                              {alert.patient_id}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="rounded-2xl bg-white/90 p-3 border border-red-100">
+                          <span className="text-[11px] font-semibold text-slate-500">Emergency Type</span>
+                          <p className="text-sm font-bold text-red-700 capitalize">
+                            {(alert.emergency_type || "General SOS").replace(/_/g, " ")}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white/90 p-3 border border-red-100">
+                          <span className="text-[11px] font-semibold text-slate-500">Assigned ASHA</span>
+                          <p className="text-sm font-bold text-slate-900 truncate">
+                            {alert.asha_worker_name || "ASHA Worker"}
+                          </p>
+                          <span className="text-[10px] text-emerald-700 font-semibold">
+                            {alert.asha_status === "ACKNOWLEDGED" ? "✓ Acknowledged" : "Pending ASHA"}
+                          </span>
+                        </div>
+
+                        <div className="rounded-2xl bg-white/90 p-3 border border-red-100">
+                          <span className="text-[11px] font-semibold text-slate-500">Gateway Node</span>
+                          <p className="text-sm font-bold text-slate-800 font-mono text-xs">
+                            {alert.lora_telemetry?.gateway_id || "GW-CHANDAPUR-PHC-01"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Medical Snapshot (if available) */}
+                      {alert.medical_snapshot && (
+                        <div className="mt-3 rounded-2xl bg-white/70 p-3 border border-red-100 text-xs flex flex-wrap items-center gap-4 text-slate-700">
+                          <div>
+                            <span className="font-semibold text-slate-500">Blood Group: </span>
+                            <span className="font-bold text-red-700">{alert.medical_snapshot.blood_group || "Unknown"}</span>
+                          </div>
+                          {alert.medical_snapshot.allergies?.length > 0 && (
+                            <div>
+                              <span className="font-semibold text-slate-500">Allergies: </span>
+                              <span className="font-medium text-slate-800">{alert.medical_snapshot.allergies.join(", ")}</span>
+                            </div>
+                          )}
+                          {alert.medical_snapshot.chronic_conditions?.length > 0 && (
+                            <div>
+                              <span className="font-semibold text-slate-500">Conditions: </span>
+                              <span className="font-medium text-slate-800">{alert.medical_snapshot.chronic_conditions.join(", ")}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Stage Progression & Action Controls */}
+                      <div className="mt-4 pt-3 border-t border-red-200/70 flex flex-wrap items-center justify-between gap-3">
+                        {/* Current Status Pill */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-slate-500">Current Status:</span>
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-xs font-extrabold text-red-800 border border-red-300">
+                            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                            {alert.status}
+                          </span>
+                        </div>
+
+                        {/* Role Action Buttons & Milestone Badges (Doctor / PHC Medical Officer) */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {alert.patient_phone && (
+                            <a
+                              href={`tel:${alert.patient_phone}`}
+                              className="inline-flex items-center gap-1.5 rounded-2xl border border-slate-300 bg-white hover:bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-700 shadow-sm transition"
+                            >
+                              <PhoneIcon className="h-4 w-4 text-emerald-600" />
+                              Call Patient
+                            </a>
+                          )}
+
+                          {/* ACTION 1: ACKNOWLEDGE PHC */}
+                          {alert.phc_status !== "ACKNOWLEDGED" && alert.status !== "RESOLVED" ? (
+                            <button
+                              type="button"
+                              onClick={() => handleAcknowledgePhc(alert)}
+                              disabled={isUpdating}
+                              className="inline-flex items-center gap-1.5 rounded-2xl bg-blue-600 hover:bg-blue-700 px-4 py-2 text-xs font-bold text-white shadow-md transition active:scale-95 disabled:opacity-50"
+                            >
+                              <CheckIcon className="h-4 w-4" />
+                              ACKNOWLEDGE PHC
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800 border border-blue-200">
+                              ✓ PHC Notified
+                            </span>
+                          )}
+
+                          {/* ACTION 2: DISPATCH AMBULANCE */}
+                          {(alert.status === "PHC_NOTIFIED" || alert.phc_status === "ACKNOWLEDGED") &&
+                            alert.ambulance_status !== "DISPATCHED" &&
+                            alert.ambulance_status !== "ARRIVED" &&
+                            alert.status !== "RESOLVED" && (
+                              <button
+                                type="button"
+                                onClick={() => handleDispatchAmbulance(alert)}
+                                disabled={isUpdating}
+                                className="inline-flex items-center gap-1.5 rounded-2xl bg-amber-600 hover:bg-amber-700 px-4 py-2 text-xs font-extrabold text-white shadow-md transition active:scale-95 disabled:opacity-50"
+                              >
+                                <AmbulanceIcon className="h-4 w-4" />
+                                🚑 DISPATCH AMBULANCE
+                              </button>
+                            )}
+
+                          {/* ACTION 3: MARK PATIENT REACHED */}
+                          {alert.status === "AMBULANCE_DISPATCHED" && (
+                            <>
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800 border border-amber-200">
+                                🚑 Ambulance Dispatched
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleMarkPatientReached(alert)}
+                                disabled={isUpdating}
+                                className="inline-flex items-center gap-1.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-xs font-extrabold text-white shadow-md transition active:scale-95 disabled:opacity-50"
+                              >
+                                <CheckCircleIcon className="h-4 w-4" />
+                                ✓ MARK PATIENT REACHED
+                              </button>
+                            </>
+                          )}
+
+                          {/* ACTION 4: RESOLVE EMERGENCY */}
+                          {alert.status === "PATIENT_REACHED" && !isResolved && (
+                            <>
+                              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-800 border border-indigo-200">
+                                ✓ Patient Reached
+                              </span>
+                              <div className="flex items-center gap-2">
+                                {resolvingAlertId === alert.alert_id ? (
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      value={resolveNotesText}
+                                      onChange={(e) => setResolveNotesText(e.target.value)}
+                                      placeholder="Resolution remarks..."
+                                      className="rounded-xl border border-slate-300 px-2.5 py-1.5 text-xs text-slate-800 bg-white"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResolveEmergency(alert)}
+                                      disabled={isUpdating}
+                                      className="rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm"
+                                    >
+                                      Confirm
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setResolvingAlertId(null)}
+                                      className="rounded-xl border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-600"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setResolvingAlertId(alert.alert_id)}
+                                    disabled={isUpdating}
+                                    className="inline-flex items-center gap-1.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 px-4 py-2 text-xs font-extrabold text-white shadow-md transition active:scale-95 disabled:opacity-50"
+                                  >
+                                    <CheckIcon className="h-4 w-4" />
+                                    RESOLVE EMERGENCY
+                                  </button>
+                                )}
+                              </div>
+                            </>
+                          )}
+
+                          {/* COMPLETED BADGE */}
+                          {isResolved && (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 border border-emerald-300">
+                              <CheckCircleIcon className="h-4 w-4 text-emerald-600" />
+                              ✓ EMERGENCY RESOLVED
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </section>
+            )}
+
             {/* Live Video Consultation Requests Queue */}
             {videoRequests.length > 0 && (
               <section className="rounded-3xl border border-blue-200 bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 p-5 text-white shadow-xl shadow-blue-900/20">
@@ -1238,3 +1570,54 @@ function VideoIcon({ className }) {
     </svg>
   )
 }
+
+function SosIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 8v4" />
+      <path d="M12 16h.01" />
+    </svg>
+  )
+}
+
+function RadioTowerIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9" />
+      <path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5" />
+      <circle cx="12" cy="12" r="2" />
+      <path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5" />
+      <path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1" />
+    </svg>
+  )
+}
+
+function AmbulanceIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 17V8a1 1 0 0 1 1-1h9l4 4h3a1 1 0 0 1 1 1v5" />
+      <path d="M3 17h1m16 0h1" />
+      <circle cx="7" cy="17" r="2" />
+      <circle cx="17" cy="17" r="2" />
+      <path d="M9 8v6M6 11h6" />
+    </svg>
+  )
+}
+
+function CheckIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  )
+}
+
+function PhoneIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92Z" />
+    </svg>
+  )
+}
+

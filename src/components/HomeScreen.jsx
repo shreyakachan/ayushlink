@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { ASHA_LANGUAGES, ashaT } from "../lib/ashaI18n.js"
-import { getAuthUser, getAshaCases } from "../lib/api.js"
+import { getAuthUser, getAshaCases, getActiveEmergencyAlerts, updateEmergencyAlertStatus } from "../lib/api.js"
 import { getPendingItems } from "../lib/offlineDb.js"
+import { startEmergencySiren, stopEmergencySiren } from "../lib/emergencySiren.js"
 import useOnlineStatus from "../hooks/useOnlineStatus.js"
 
 /**
@@ -37,6 +38,11 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
     const auth = getAuthUser()
     return auth?.full_name || auth?.name || "ASHA Worker"
   })
+  const [activeEmergencies, setActiveEmergencies] = useState([])
+  const [sirenPlaying, setSirenPlaying] = useState(false)
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false)
+  const [acknowledgingId, setAcknowledgingId] = useState(null)
+  const alertedIdsRef = useRef(new Set())
   const t = ashaT(lang)
 
   useEffect(() => {
@@ -114,6 +120,112 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
       window.removeEventListener("focus", onPendingUpdated)
     }
   }, [])
+
+  // Active Emergency LoRa Alerts & Software Siren Polling
+  useEffect(() => {
+    let isMounted = true
+    let pollTimer = null
+
+    async function checkEmergencies() {
+      try {
+        const list = await getActiveEmergencyAlerts()
+        if (!isMounted) return
+        if (Array.isArray(list)) {
+          // Filter unresolved alerts and sort descending by creation time
+          const unresolved = list.filter((a) => a.status !== "RESOLVED")
+          unresolved.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+
+          // Strictly display ONLY the single newest active emergency alert
+          const currentAlertList = unresolved.length > 0 ? [unresolved[0]] : []
+          setActiveEmergencies(currentAlertList)
+
+          // Siren logic strictly for the current active emergency
+          if (currentAlertList.length > 0) {
+            const currentAlert = currentAlertList[0]
+            const isUnacked =
+              currentAlert.status !== "RESOLVED" &&
+              currentAlert.asha_status !== "ACKNOWLEDGED" &&
+              currentAlert.status !== "ASHA_ACKNOWLEDGED"
+
+            if (isUnacked && !alertedIdsRef.current.has(currentAlert.alert_id)) {
+              alertedIdsRef.current.add(currentAlert.alert_id)
+              startEmergencySiren()
+                .then((res) => {
+                  if (!isMounted) return
+                  if (res.success) {
+                    setSirenPlaying(true)
+                    setAutoplayBlocked(false)
+                  } else if (res.autoplayBlocked) {
+                    setSirenPlaying(false)
+                    setAutoplayBlocked(true)
+                  }
+                })
+                .catch(() => {
+                  if (isMounted) setAutoplayBlocked(true)
+                })
+            }
+          } else {
+            stopEmergencySiren()
+            setSirenPlaying(false)
+            setAutoplayBlocked(false)
+          }
+        }
+      } catch {}
+    }
+
+    checkEmergencies()
+    pollTimer = setInterval(checkEmergencies, 6500)
+
+    const handleFocus = () => {
+      checkEmergencies()
+    }
+    window.addEventListener("focus", handleFocus)
+
+    return () => {
+      isMounted = false
+      if (pollTimer) clearInterval(pollTimer)
+      window.removeEventListener("focus", handleFocus)
+      stopEmergencySiren()
+    }
+  }, [])
+
+  const handleActivateSiren = async () => {
+    const res = await startEmergencySiren()
+    if (res.success) {
+      setSirenPlaying(true)
+      setAutoplayBlocked(false)
+    }
+  }
+
+  const handleStopSiren = () => {
+    stopEmergencySiren()
+    setSirenPlaying(false)
+  }
+
+  const handleAcknowledgeEmergency = async (alert) => {
+    const alertId = alert.alert_id
+    if (!alertId || acknowledgingId === alertId) return
+    setAcknowledgingId(alertId)
+
+    // Stop siren immediately upon acknowledgment
+    stopEmergencySiren()
+    setSirenPlaying(false)
+    setAutoplayBlocked(false)
+
+    try {
+      const updated = await updateEmergencyAlertStatus(alertId, {
+        status: "ASHA_ACKNOWLEDGED",
+        asha_status: "ACKNOWLEDGED",
+        notes: "Acknowledged by ASHA worker via dashboard",
+      })
+
+      setActiveEmergencies([updated])
+    } catch (err) {
+      console.error("Failed to acknowledge emergency:", err)
+    } finally {
+      setAcknowledgingId(null)
+    }
+  }
 
   const navItems = [
     { id: "home", label: t.nav.home, Icon: HomeIcon },
@@ -316,6 +428,166 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
           </header>
 
           <div className="flex flex-col gap-6 px-5 py-6 lg:px-8">
+            {/* ASHA Emergency Alerts (Live LoRa Simulation + Software Siren) */}
+            {activeEmergencies.length > 0 && (
+              <section className="flex flex-col gap-4">
+                {activeEmergencies.map((alert) => {
+                  const isAcknowledged =
+                    alert.asha_status === "ACKNOWLEDGED" || alert.status === "ASHA_ACKNOWLEDGED"
+                  const timeFormatted = alert.created_at
+                    ? new Date(alert.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                    : "Just now"
+
+                  return (
+                    <div
+                      key={alert.alert_id}
+                      className={`relative overflow-hidden rounded-3xl border-2 p-5 shadow-xl transition
+                        ${
+                          isAcknowledged
+                            ? "border-emerald-300 bg-emerald-50/90 text-slate-800 shadow-emerald-500/10"
+                            : "border-red-500 bg-red-50/95 text-slate-800 shadow-red-500/20 animate-pulse-subtle"
+                        }`}
+                    >
+                      {/* Card Header */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-red-200/80 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-600 text-white shadow-md shadow-red-600/30 animate-bounce">
+                            <SosIcon className="h-5 w-5" />
+                          </span>
+                          <div>
+                            <h2 className="text-base font-extrabold tracking-tight text-red-900">
+                              {t.emergency?.title || "EMERGENCY ALERT"}
+                            </h2>
+                            <p className="text-[11px] font-semibold text-red-700">
+                              {alert.alert_id} &middot; {timeFormatted}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Simulated LoRa Tag */}
+                        <div className="flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-800 border border-red-300">
+                          <RadioTowerIcon className="h-3.5 w-3.5 text-red-600" />
+                          <span>{t.emergency?.simulatedLoraReceived || "Simulated LoRa Signal"}</span>
+                        </div>
+                      </div>
+
+                      {/* Real Emergency Context */}
+                      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <div className="rounded-2xl bg-white/80 p-3 border border-red-100">
+                          <span className="text-[11px] font-semibold text-slate-500">{t.emergency?.patient || "Patient"}</span>
+                          <p className="text-sm font-bold text-slate-900 truncate">{alert.patient_name}</p>
+                          {alert.patient_id && (
+                            <span className="text-[10px] font-mono text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
+                              {alert.patient_id}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="rounded-2xl bg-white/80 p-3 border border-red-100">
+                          <span className="text-[11px] font-semibold text-slate-500">{t.emergency?.village || "Village"}</span>
+                          <p className="text-sm font-bold text-slate-900">{alert.village || "Chandapur"}</p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white/80 p-3 border border-red-100">
+                          <span className="text-[11px] font-semibold text-slate-500">{t.emergency?.emergencyType || "Emergency"}</span>
+                          <p className="text-sm font-bold text-red-700 capitalize">
+                            {(alert.emergency_type || "General SOS").replace(/_/g, " ")}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white/80 p-3 border border-red-100">
+                          <span className="text-[11px] font-semibold text-slate-500">{t.emergency?.gateway || "Gateway"}</span>
+                          <p className="text-sm font-bold text-slate-800 font-mono text-xs">
+                            {alert.lora_telemetry?.gateway_id || "GW-CHANDAPUR-PHC-01"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Siren & Status Controls */}
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-red-200/60">
+                        {/* Siren Audio Controls */}
+                        <div>
+                          {sirenPlaying && !isAcknowledged && (
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1 text-xs font-extrabold text-white shadow-md shadow-red-600/30 animate-pulse">
+                                <SpeakerIcon className="h-4 w-4 animate-bounce" />
+                                {t.emergency?.sirenActive || "SIREN ACTIVE"}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={handleStopSiren}
+                                className="text-xs font-semibold text-slate-600 hover:text-slate-900 underline"
+                              >
+                                Stop Siren
+                              </button>
+                            </div>
+                          )}
+
+                          {autoplayBlocked && !isAcknowledged && !sirenPlaying && (
+                            <button
+                              type="button"
+                              onClick={handleActivateSiren}
+                              className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 hover:bg-amber-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-md transition active:scale-95"
+                            >
+                              <SpeakerIcon className="h-4 w-4" />
+                              {t.emergency?.tapToActivateSiren || "Tap to Activate Siren"}
+                            </button>
+                          )}
+
+                          {isAcknowledged && (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 border border-emerald-300">
+                              <CheckIcon className="h-3.5 w-3.5 text-emerald-600" />
+                              {t.emergency?.emergencyAcknowledged || "Emergency Acknowledged"}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-2">
+                          {alert.patient_phone && (
+                            <a
+                              href={`tel:${alert.patient_phone}`}
+                              className="inline-flex items-center gap-1.5 rounded-2xl border border-slate-300 bg-white hover:bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-700 shadow-sm transition"
+                            >
+                              <PhoneIcon className="h-4 w-4 text-emerald-600" />
+                              {t.emergency?.callPatient || "Call"} {alert.patient_phone}
+                            </a>
+                          )}
+
+                          {!isAcknowledged ? (
+                            <button
+                              type="button"
+                              onClick={() => handleAcknowledgeEmergency(alert)}
+                              disabled={acknowledgingId === alert.alert_id}
+                              className="inline-flex items-center gap-2 rounded-2xl bg-red-600 hover:bg-red-700 px-5 py-2.5 text-xs font-extrabold text-white shadow-lg shadow-red-600/30 transition active:scale-95 disabled:opacity-50"
+                            >
+                              {acknowledgingId === alert.alert_id ? (
+                                <span>{t.emergency?.acknowledging || "Acknowledging..."}</span>
+                              ) : (
+                                <>
+                                  <CheckIcon className="h-4 w-4" />
+                                  <span>{t.emergency?.acknowledgeEmergency || "ACKNOWLEDGE EMERGENCY"}</span>
+                                </>
+                              )}
+                            </button>
+                          ) : (
+                            <span className="text-xs font-bold text-emerald-700">
+                              Status: {alert.status}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Simulation Note Footer */}
+                      <div className="mt-2 text-[10px] text-slate-400 text-center sm:text-left">
+                        {t.emergency?.simulationBadge || "Software-Only LoRa Simulation (IN865 Band)"}
+                      </div>
+                    </div>
+                  )
+                })}
+              </section>
+            )}
+
             {/* Network status card */}
             <section
               className={`flex items-center justify-between gap-4 rounded-3xl border p-5 transition
@@ -751,6 +1023,36 @@ function ChevronRightIcon({ className }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m9 18 6-6-6-6" />
+    </svg>
+  )
+}
+
+function RadioTowerIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9" />
+      <path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5" />
+      <circle cx="12" cy="12" r="2" />
+      <path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5" />
+      <path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1" />
+    </svg>
+  )
+}
+
+function SpeakerIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </svg>
+  )
+}
+
+function PhoneIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92Z" />
     </svg>
   )
 }

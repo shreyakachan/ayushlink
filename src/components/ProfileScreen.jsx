@@ -61,6 +61,14 @@ function GlobeIcon({ className }) {
     </svg>
   )
 }
+function PillIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10.5 20.5a4.95 4.95 0 0 1-7-7l6-6a4.95 4.95 0 0 1 7 7z" />
+      <path d="m8.5 8.5 7 7" />
+    </svg>
+  )
+}
 function BellIcon({ className }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -161,6 +169,7 @@ export default function ProfileScreen({
   onLangChange,
   onBack,
   onLogout,
+  onSelect,
   user = null,
   role = null,
 }) {
@@ -329,6 +338,15 @@ export default function ProfileScreen({
           desc: credentialsDesc,
           Icon: BadgeIcon,
         },
+        ...(!isDoctor && onSelect ? [
+          {
+            id: "inventory",
+            label: t.inventory?.title || "Medicine Inventory",
+            desc: t.inventory?.subtitle || "Track medicine stocks and supply levels",
+            Icon: PillIcon,
+            onClick: () => onSelect("inventory"),
+          }
+        ] : []),
       ],
     },
     {

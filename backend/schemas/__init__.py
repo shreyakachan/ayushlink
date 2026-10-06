@@ -42,6 +42,21 @@ from schemas.sync import (
     BatchSyncResponse,
 )
 from schemas.notification import NotificationResponse
+from schemas.inventory import (
+    InventoryItemBase,
+    InventoryItemCreate,
+    InventoryItemUpdate,
+    InventoryStockAdjust,
+    InventoryItemResponse,
+    InventoryListResponse,
+)
+from schemas.emergency_alert import (
+    EmergencySOSRequest,
+    SimulatedLoRaPacket,
+    EmergencyStatusUpdate,
+    EmergencyAlertResponse,
+    GatewayACKResponse,
+)
 
 __all__ = [
     "HealthResponse",
@@ -74,4 +89,15 @@ __all__ = [
     "SyncItemResult",
     "BatchSyncResponse",
     "NotificationResponse",
+    "InventoryItemBase",
+    "InventoryItemCreate",
+    "InventoryItemUpdate",
+    "InventoryStockAdjust",
+    "InventoryItemResponse",
+    "InventoryListResponse",
+    "EmergencySOSRequest",
+    "SimulatedLoRaPacket",
+    "EmergencyStatusUpdate",
+    "EmergencyAlertResponse",
+    "GatewayACKResponse",
 ]
