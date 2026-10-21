@@ -81,10 +81,10 @@ async def seed():
     doctor_accounts = [
         {
             "doctor_id": "DOC-101",
-            "full_name": "Dr. Ramesh Gupta",
+            "full_name": "Dr Arvind Verma",
             "phone": "9823000001",
             "hashed_password": pwd_hash_doc,
-            "email": "dr.ramesh@ayushlink.in",
+            "email": "dr.arvind@ayushlink.in",
             "specialization": "General Physician & AYUSH Consultant",
             "qualification": "MBBS, MD",
             "registration_number": "MCI-2024-8842",
@@ -95,6 +95,24 @@ async def seed():
                 "consultations_completed": 48,
                 "active_cases": 6,
                 "prescriptions_signed": 34,
+            },
+        },
+        {
+            "doctor_id": "DOC-501",
+            "full_name": "Dr Arvind Verma",
+            "phone": "9823088882",
+            "hashed_password": pwd_hash_simple,
+            "email": "dr.arvind@ayushlink.in",
+            "specialization": "General Medicine",
+            "qualification": "MBBS, MD",
+            "registration_number": "MCI-2024-5001",
+            "assigned_facility": "Chandapur PHC",
+            "preferred_language": "en",
+            "is_on_duty": True,
+            "stats": {
+                "consultations_completed": 34,
+                "active_cases": 2,
+                "prescriptions_signed": 30,
             },
         },
         {

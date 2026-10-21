@@ -5,10 +5,14 @@ from pydantic import BaseModel, Field
 
 class EmergencySOSRequest(BaseModel):
     """Payload sent by patient or field worker to trigger an emergency SOS."""
+    patient_id: Optional[str] = Field(default=None, description="Patient identifier (e.g. P-4559)")
+    patient_name: Optional[str] = Field(default=None, description="Patient full name")
+    village: Optional[str] = Field(default=None, description="Patient village")
     emergency_type: str = Field(default="general_sos", description="Type of emergency (general_sos, maternal_emergency, cardiac_sos, trauma, etc.)")
     emergency_notes: Optional[str] = Field(default=None, description="Optional brief notes or context")
     gps_coordinates: Optional[Dict[str, float]] = Field(default=None, description="Optional latitude/longitude {'lat': 19.9975, 'lng': 73.7898}")
     simulated_telemetry: Optional[Dict[str, Any]] = Field(default=None, description="Optional custom simulation parameters (SF, frequency, etc.)")
+    offline_id: Optional[str] = Field(default=None, description="Client-side offline queue ID for deduplication and sync")
 
 
 class SimulatedLoRaPacket(BaseModel):

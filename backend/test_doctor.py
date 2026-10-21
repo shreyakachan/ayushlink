@@ -27,7 +27,7 @@ async def run_tests():
     notifs_col = get_collection(COLLECTION_NOTIFICATIONS)
 
     # Test numbers
-    phone_doctor = "9823000001"
+    phone_doctor = "9823098877"
     phone_patient = "9823055555"
     phone_asha = "9876555555"
 

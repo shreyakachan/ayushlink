@@ -9,7 +9,7 @@ import PatientListenButton from "./PatientListenButton.jsx"
  */
 
 const ASHA_WORKER = {
-  name: "Meena Kamble",
+  name: "Pooja Sharma",
   phone: "+91 98765 43210",
   village: "Chandapur",
 }

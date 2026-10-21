@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { clearAuthSession, getAuthUser } from "./lib/api.js"
+import { clearAuthSession, getAuthUser, getPatientAuthUser } from "./lib/api.js"
 import OfflineBadge from "./components/OfflineBadge.jsx"
 import SplashScreen from "./components/SplashScreen.jsx"
 import RoleSelectScreen from "./components/RoleSelectScreen.jsx"
@@ -73,6 +73,7 @@ export default function App() {
   const [currentPatient, setCurrentPatient] = useState(() => getAuthUser())
   const [scannedPatient, setScannedPatient] = useState(null)
   const [consultationPatient, setConsultationPatient] = useState(null)
+  const [callPatient, setCallPatient] = useState(null)
 
   const setScreen = (newScreen) => {
     if (VALID_SCREENS.has(newScreen)) {
@@ -304,7 +305,19 @@ export default function App() {
         <PatientPrescriptionScreen lang={patientLang} onBack={() => setScreen("patient-home")} />
       )}
       {activeScreen === "patient-call" && (
-        <PatientCallScreen key={callSessionId} lang={patientLang} onBack={() => setScreen("patient-home")} />
+        <PatientCallScreen
+          key={callSessionId}
+          patient={callPatient || currentPatient}
+          lang={role === "patient" ? patientLang : ashaLang}
+          onBack={() => {
+            setCallPatient(null)
+            if (role === "asha") {
+              setScreen("patients")
+            } else {
+              setScreen("patient-home")
+            }
+          }}
+        />
       )}
       {activeScreen === "patient-medicines" && (
         <PatientMedicinesScreen lang={patientLang} onBack={() => setScreen("patient-home")} />
@@ -372,6 +385,11 @@ export default function App() {
             setConsultationPatient(p)
             setScreen("doctor-consultation")
           }}
+          onTalkToDoctor={(p) => {
+            setCallPatient(p)
+            setCallSessionId((n) => n + 1)
+            setScreen("patient-call")
+          }}
           onRegisterNew={() => setScreen("register")}
         />
       )}
@@ -393,9 +411,9 @@ export default function App() {
       {activeScreen === "profile" && (
         <ProfileScreen
           role={role}
-          user={getAuthUser()}
-          lang={role === "doctor" ? "en" : ashaLang}
-          onLangChange={setAshaLang}
+          user={role === "patient" ? getPatientAuthUser() : getAuthUser()}
+          lang={role === "doctor" ? "en" : role === "patient" ? patientLang : ashaLang}
+          onLangChange={role === "patient" ? setPatientLang : setAshaLang}
           onBack={goToRoleHome}
           onSelect={handleSelect}
           onLogout={() => {

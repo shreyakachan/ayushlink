@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { ASHA_LANGUAGES, ashaT } from "../lib/ashaI18n.js"
 import { getAuthUser, getAshaCases, getActiveEmergencyAlerts, updateEmergencyAlertStatus } from "../lib/api.js"
 import { getPendingItems } from "../lib/offlineDb.js"
-import { startEmergencySiren, stopEmergencySiren } from "../lib/emergencySiren.js"
+import { unlockAudioContext, startEmergencySiren, stopEmergencySiren, isSirenPlaying } from "../lib/emergencySiren.js"
 import useOnlineStatus from "../hooks/useOnlineStatus.js"
 
 /**
@@ -36,20 +36,72 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
   const [pendingCount, setPendingCount] = useState(0)
   const [workerName, setWorkerName] = useState(() => {
     const auth = getAuthUser()
-    return auth?.full_name || auth?.name || "ASHA Worker"
+    const role = typeof window !== "undefined" ? localStorage.getItem("ayushlink_role") : null
+    if (role === "asha" && auth && (auth.full_name || auth.name)) {
+      return auth.full_name || auth.name
+    }
+    if (auth?.worker_id || auth?.role === "asha") {
+      return auth.full_name || "Pooja Sharma"
+    }
+    return "Pooja Sharma"
   })
   const [activeEmergencies, setActiveEmergencies] = useState([])
   const [sirenPlaying, setSirenPlaying] = useState(false)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [acknowledgingId, setAcknowledgingId] = useState(null)
   const alertedIdsRef = useRef(new Set())
+  const acknowledgedIdsRef = useRef(new Set())
+  const activeEmergenciesRef = useRef([])
+  activeEmergenciesRef.current = activeEmergencies
   const t = ashaT(lang)
+
+  // One-time user interaction listener to unlock AudioContext for ASHA dashboard
+  useEffect(() => {
+    let isUnlocked = false
+    const unlockEvents = ["pointerdown", "touchstart", "click", "keydown"]
+
+    const handleUserInteraction = async () => {
+      const unlocked = await unlockAudioContext()
+      if (unlocked) {
+        isUnlocked = true
+        unlockEvents.forEach((evt) => {
+          window.removeEventListener(evt, handleUserInteraction, true)
+        })
+      }
+      // If there is already an active unacknowledged emergency waiting for audio, start it
+      const unacked = (activeEmergenciesRef.current || []).filter(
+        (a) => !acknowledgedIdsRef.current.has(a.alert_id || a.id)
+      )
+      if (unacked.length > 0 && !isSirenPlaying()) {
+        const res = await startEmergencySiren()
+        if (res && res.success) {
+          setSirenPlaying(true)
+          setAutoplayBlocked(false)
+        }
+      }
+    }
+
+    unlockEvents.forEach((evt) => {
+      window.addEventListener(evt, handleUserInteraction, { capture: true, passive: true })
+    })
+
+    return () => {
+      unlockEvents.forEach((evt) => {
+        window.removeEventListener(evt, handleUserInteraction, true)
+      })
+    }
+  }, [])
 
   useEffect(() => {
     async function loadDashboard() {
       const auth = getAuthUser()
-      if (auth?.full_name || auth?.name) {
+      const role = localStorage.getItem("ayushlink_role")
+      if (role === "asha" && auth && (auth.full_name || auth.name)) {
         setWorkerName(auth.full_name || auth.name)
+      } else if (auth?.worker_id || auth?.role === "asha") {
+        setWorkerName(auth.full_name || "Pooja Sharma")
+      } else {
+        setWorkerName("Pooja Sharma")
       }
       let liveList = []
       try {
@@ -131,38 +183,43 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
         const list = await getActiveEmergencyAlerts()
         if (!isMounted) return
         if (Array.isArray(list)) {
-          // Filter unresolved alerts and sort descending by creation time
-          const unresolved = list.filter((a) => a.status !== "RESOLVED")
-          unresolved.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+          // Backend returns only pending/unhandled SOS alerts, filter out already acknowledged
+          const pendingAlerts = [...list]
+            .filter((a) => !acknowledgedIdsRef.current.has(a.alert_id || a.id))
+            .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
 
-          // Strictly display ONLY the single newest active emergency alert
-          const currentAlertList = unresolved.length > 0 ? [unresolved[0]] : []
+          // Strictly display ONLY the single newest unacknowledged pending emergency alert
+          const currentAlertList = pendingAlerts.length > 0 ? [pendingAlerts[0]] : []
           setActiveEmergencies(currentAlertList)
 
-          // Siren logic strictly for the current active emergency
+          // Siren logic strictly for active unacknowledged pending emergency
           if (currentAlertList.length > 0) {
             const currentAlert = currentAlertList[0]
-            const isUnacked =
-              currentAlert.status !== "RESOLVED" &&
-              currentAlert.asha_status !== "ACKNOWLEDGED" &&
-              currentAlert.status !== "ASHA_ACKNOWLEDGED"
-
-            if (isUnacked && !alertedIdsRef.current.has(currentAlert.alert_id)) {
-              alertedIdsRef.current.add(currentAlert.alert_id)
+            const aid = currentAlert.alert_id || currentAlert.id
+            if (!isSirenPlaying()) {
               startEmergencySiren()
                 .then((res) => {
                   if (!isMounted) return
-                  if (res.success) {
+                  if (res && res.success) {
                     setSirenPlaying(true)
                     setAutoplayBlocked(false)
-                  } else if (res.autoplayBlocked) {
+                    if (aid) alertedIdsRef.current.add(aid)
+                  } else if (res && res.autoplayBlocked) {
+                    setSirenPlaying(false)
+                    setAutoplayBlocked(true)
+                  } else {
+                    setSirenPlaying(false)
+                  }
+                })
+                .catch(() => {
+                  if (isMounted) {
                     setSirenPlaying(false)
                     setAutoplayBlocked(true)
                   }
                 })
-                .catch(() => {
-                  if (isMounted) setAutoplayBlocked(true)
-                })
+            } else {
+              setSirenPlaying(true)
+              setAutoplayBlocked(false)
             }
           } else {
             stopEmergencySiren()
@@ -174,24 +231,29 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
     }
 
     checkEmergencies()
-    pollTimer = setInterval(checkEmergencies, 6500)
+    pollTimer = setInterval(checkEmergencies, 5000)
 
     const handleFocus = () => {
       checkEmergencies()
     }
     window.addEventListener("focus", handleFocus)
+    window.addEventListener("ayushlink:sync_complete", checkEmergencies)
+    window.addEventListener("ayushlink:pending_updated", checkEmergencies)
 
     return () => {
       isMounted = false
       if (pollTimer) clearInterval(pollTimer)
       window.removeEventListener("focus", handleFocus)
+      window.removeEventListener("ayushlink:sync_complete", checkEmergencies)
+      window.removeEventListener("ayushlink:pending_updated", checkEmergencies)
       stopEmergencySiren()
     }
   }, [])
 
   const handleActivateSiren = async () => {
+    await unlockAudioContext()
     const res = await startEmergencySiren()
-    if (res.success) {
+    if (res && res.success) {
       setSirenPlaying(true)
       setAutoplayBlocked(false)
     }
@@ -203,25 +265,30 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
   }
 
   const handleAcknowledgeEmergency = async (alert) => {
-    const alertId = alert.alert_id
+    const alertId = alert?.alert_id || alert?.id
     if (!alertId || acknowledgingId === alertId) return
     setAcknowledgingId(alertId)
+    acknowledgedIdsRef.current.add(alertId)
 
-    // Stop siren immediately upon acknowledgment
+    // Stop siren immediately and permanently upon acknowledgment
     stopEmergencySiren()
     setSirenPlaying(false)
     setAutoplayBlocked(false)
 
+    // Optimistically clear the acknowledged emergency from view immediately
+    setActiveEmergencies((prev) => prev.filter((a) => a.alert_id !== alertId && a.id !== alertId))
+
     try {
-      const updated = await updateEmergencyAlertStatus(alertId, {
+      await updateEmergencyAlertStatus(alertId, {
         status: "ASHA_ACKNOWLEDGED",
         asha_status: "ACKNOWLEDGED",
         notes: "Acknowledged by ASHA worker via dashboard",
       })
 
-      setActiveEmergencies([updated])
+      // Ensure active emergencies list is cleared
+      setActiveEmergencies([])
     } catch (err) {
-      console.error("Failed to acknowledge emergency:", err)
+      console.error("[HomeScreen] Failed to acknowledge emergency:", err)
     } finally {
       setAcknowledgingId(null)
     }
@@ -379,9 +446,14 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-600/30">
                   <PlusPulseIcon className="h-5 w-5 text-white" />
                 </span>
-                <span className="text-lg font-bold tracking-tight text-slate-800">
-                  Ayush<span className="text-blue-600">Link</span>
-                </span>
+                <div className="min-w-0">
+                  <span className="block text-sm font-bold tracking-tight text-slate-800 truncate">
+                    {workerName}
+                  </span>
+                  <span className="block text-[10px] font-medium text-slate-500 truncate">
+                    {t.dashboard.ashaRole || "ASHA Worker · Chandapur"}
+                  </span>
+                </div>
               </div>
               <div className="hidden lg:block">
                 <p className="text-sm text-slate-500">{t.dashboard.welcomeBack}</p>

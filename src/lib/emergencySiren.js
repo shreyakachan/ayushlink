@@ -6,10 +6,11 @@
  * 
  * Safety & Quality:
  * - Pure browser Web Audio API (0 external dependencies)
- * - Safe gain levels (capped at 0.20 to protect hearing)
- * - Automatic tone modulation (750 Hz <-> 960 Hz alternating pulse)
- * - Autoplay policy safety with user gesture resume handling
- * - Clean resource release on stop/unmount
+ * - Safe gain levels (capped at 0.25 to protect hearing)
+ * - Automatic tone modulation (720 Hz <-> 960 Hz alternating pulse)
+ * - Explicit user gesture unlock mechanism (unlockAudioContext)
+ * - Persistent, reusable AudioContext across SOS events
+ * - Clean resource release on stop/unmount without destroying AudioContext
  */
 
 let audioCtx = null
@@ -17,6 +18,8 @@ let sirenOscillator = null
 let sirenGain = null
 let sirenTimer = null
 let isPlaying = false
+
+let shouldPlay = false
 
 /**
  * Check if the current browser environment supports the Web Audio API.
@@ -26,6 +29,41 @@ let isPlaying = false
 export function isSirenSupported() {
   if (typeof window === "undefined") return false
   return Boolean(window.AudioContext || window.webkitAudioContext)
+}
+
+/**
+ * Lazily initialize and resume the AudioContext from a user gesture.
+ * Safe to call multiple times; returns true if the context is running.
+ *
+ * @returns {Promise<boolean>}
+ */
+export async function unlockAudioContext() {
+  if (!isSirenSupported()) return false
+
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext
+    if (!audioCtx || audioCtx.state === "closed") {
+      audioCtx = new AudioContextClass()
+    }
+
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume()
+    }
+
+    return audioCtx.state === "running"
+  } catch (err) {
+    console.warn("[EmergencySiren] AudioContext unlock failed:", err)
+    return false
+  }
+}
+
+/**
+ * Get current state of the internal AudioContext.
+ *
+ * @returns {string}
+ */
+export function getAudioContextState() {
+  return audioCtx ? audioCtx.state : "uninitialized"
 }
 
 /**
@@ -39,6 +77,7 @@ export function isSirenSupported() {
  * @returns {Promise<{ success: boolean, autoplayBlocked?: boolean, error?: string }>}
  */
 export async function startEmergencySiren(options = {}) {
+  shouldPlay = true
   if (isPlaying) {
     return { success: true }
   }
@@ -53,7 +92,7 @@ export async function startEmergencySiren(options = {}) {
       audioCtx = new AudioContextClass()
     }
 
-    // Handle browser autoplay policy restrictions
+    // Attempt resume if suspended
     if (audioCtx.state === "suspended") {
       try {
         await audioCtx.resume()
@@ -62,8 +101,32 @@ export async function startEmergencySiren(options = {}) {
       }
     }
 
-    if (audioCtx.state === "suspended") {
+    // If stop was requested while resuming, abort cleanly
+    if (!shouldPlay) {
+      return { success: false }
+    }
+
+    if (audioCtx.state !== "running") {
       return { success: false, autoplayBlocked: true }
+    }
+
+    // Clean up any existing oscillator/timer cleanly before starting
+    if (sirenTimer) {
+      clearInterval(sirenTimer)
+      sirenTimer = null
+    }
+    if (sirenOscillator) {
+      try {
+        sirenOscillator.stop()
+        sirenOscillator.disconnect()
+      } catch {}
+      sirenOscillator = null
+    }
+    if (sirenGain) {
+      try {
+        sirenGain.disconnect()
+      } catch {}
+      sirenGain = null
     }
 
     const lowFreq = options.lowFreq || 720
@@ -78,7 +141,7 @@ export async function startEmergencySiren(options = {}) {
     sirenOscillator.type = "sine"
     sirenOscillator.frequency.setValueAtTime(lowFreq, audioCtx.currentTime)
 
-    // Gentle fade in
+    // Gentle fade in to avoid click transients
     sirenGain.gain.setValueAtTime(0.01, audioCtx.currentTime)
     sirenGain.gain.exponentialRampToValueAtTime(volume, audioCtx.currentTime + 0.1)
 
@@ -88,7 +151,7 @@ export async function startEmergencySiren(options = {}) {
     sirenOscillator.start()
     isPlaying = true
 
-    // Alternate frequencies to create the emergency sweep
+    // Alternate frequencies to create the emergency siren sweep
     let high = false
     sirenTimer = setInterval(() => {
       if (!isPlaying || !sirenOscillator || !audioCtx || audioCtx.state !== "running") return
@@ -112,25 +175,27 @@ export async function startEmergencySiren(options = {}) {
 }
 
 /**
- * Stop the emergency siren and cleanly dispose of active Web Audio resources.
+ * Stop the emergency siren and cleanly dispose of active nodes immediately.
  */
 export function stopEmergencySiren() {
+  shouldPlay = false
+  isPlaying = false
+
   if (sirenTimer) {
     clearInterval(sirenTimer)
     sirenTimer = null
   }
 
-  if (sirenGain && audioCtx && audioCtx.state === "running") {
+  if (sirenGain && audioCtx) {
     try {
-      // Gentle fade out before disconnection to avoid click artifacts
-      sirenGain.gain.setValueAtTime(sirenGain.gain.value, audioCtx.currentTime)
-      sirenGain.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 0.08)
+      sirenGain.gain.cancelScheduledValues(0)
+      sirenGain.gain.setValueAtTime(0, audioCtx.currentTime)
     } catch {}
   }
 
   if (sirenOscillator) {
     try {
-      sirenOscillator.stop(audioCtx ? audioCtx.currentTime + 0.09 : 0)
+      sirenOscillator.stop(0)
       sirenOscillator.disconnect()
     } catch {}
     sirenOscillator = null
@@ -142,8 +207,6 @@ export function stopEmergencySiren() {
     } catch {}
     sirenGain = null
   }
-
-  isPlaying = false
 }
 
 /**
@@ -154,3 +217,16 @@ export function stopEmergencySiren() {
 export function isSirenPlaying() {
   return isPlaying
 }
+
+if (typeof window !== "undefined") {
+  window.__ayushlink_emergency_siren = {
+    unlockAudioContext,
+    startEmergencySiren,
+    stopEmergencySiren,
+    isSirenPlaying,
+    getAudioContextState,
+    getAudioContext: () => audioCtx,
+  }
+}
+
+

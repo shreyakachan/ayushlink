@@ -586,7 +586,7 @@ export default function DoctorConsultationScreen({
                                   setViewingPrescription({
                                     prescription_id: matchingRx?.prescription_id || (cons.consultation_id ? `RX-${cons.consultation_id.replace('CONS-', '')}` : "RX-4454"),
                                     consultation_id: cons.consultation_id,
-                                    doctor_name: cons.doctor_name || matchingRx?.doctor_name || doctor?.full_name || doctor?.name || "Doctor",
+                                    doctor_name: cons.doctor_name || matchingRx?.doctor_name || (doctor?.full_name === "Shreya" ? "Dr Arvind Verma" : (doctor?.full_name || doctor?.name || "Dr Arvind Verma")),
                                     diagnosis: cons.diagnosis || matchingRx?.diagnosis,
                                     notes: cons.notes,
                                     advice: cons.advice || matchingRx?.advice || matchingRx?.instructions || cons.notes || "",
@@ -603,7 +603,7 @@ export default function DoctorConsultationScreen({
                             )}
 
                             <div className="mt-2 text-[10px] text-slate-400 flex items-center justify-between">
-                              <span>{cons.doctor_name || "Doctor"}</span>
+                              <span>{cons.doctor_name || (doctor?.full_name === "Shreya" ? "Dr Arvind Verma" : (doctor?.full_name || doctor?.name || "Dr Arvind Verma"))}</span>
                               <span>{formatDate(cons.date_time)}</span>
                             </div>
                           </div>
@@ -961,7 +961,7 @@ export default function DoctorConsultationScreen({
 
                 <div>
                   <p className="text-[10px] uppercase font-bold text-slate-400">Prescribing Doctor</p>
-                  <p className="text-sm font-bold text-slate-800 mt-0.5">{viewingPrescription.doctor_name || doctor?.full_name || doctor?.name || "Doctor"}</p>
+                  <p className="text-sm font-bold text-slate-800 mt-0.5">{viewingPrescription.doctor_name || (doctor?.full_name === "Shreya" ? "Dr Arvind Verma" : (doctor?.full_name || doctor?.name || "Dr Arvind Verma"))}</p>
                   <p className="text-slate-600 mt-0.5">{doctor?.specialization || "Medical Officer"}</p>
                   <p className="text-slate-500 mt-0.5">{(doctor?.assigned_facility || doctor?.facility) ? `${doctor.assigned_facility || doctor.facility} • ` : ""}Date: {formatDate(viewingPrescription.date || viewingPrescription.date_time)}</p>
                 </div>

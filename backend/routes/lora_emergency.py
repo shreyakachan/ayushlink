@@ -31,14 +31,27 @@ router = APIRouter(tags=["LoRa Emergency Response (Software Simulation)"])
     "/emergency/sos",
     response_model=EmergencyAlertResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Trigger Emergency SOS (Patient only)",
-    description="Authenticates the patient via JWT, creates a real emergency alert in MongoDB, simulates compact LoRa packet transmission, and dispatches high-priority alerts to the assigned ASHA worker and PHC Doctor.",
+    summary="Trigger Emergency SOS",
+    description="Authenticates the caller via JWT (Patient, ASHA, or Doctor), creates a real emergency alert in MongoDB, simulates compact LoRa packet transmission, and dispatches high-priority alerts.",
 )
 async def trigger_sos(
     body: EmergencySOSRequest,
-    current_patient: dict = Depends(get_current_patient),
+    payload: dict = Depends(get_current_user_payload),
 ):
-    return await trigger_patient_emergency_sos(body, current_patient)
+    role = payload.get("role")
+    if role == "patient":
+        user_doc = await get_current_patient(payload)
+    elif role == "asha":
+        user_doc = await get_current_asha_worker(payload)
+    elif role == "doctor":
+        user_doc = await get_current_doctor(payload)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized role for emergency SOS.",
+        )
+    return await trigger_patient_emergency_sos(body, user_doc)
+
 
 
 # ==========================================

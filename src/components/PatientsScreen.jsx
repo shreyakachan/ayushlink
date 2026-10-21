@@ -100,7 +100,16 @@ function StethoscopeIcon({ className }) {
   )
 }
 
-export default function PatientsScreen({ lang = "en", onBack, onRegisterNew, onOpenConsultation }) {
+function VideoIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m22 8-6 4 6 4V8Z" />
+      <rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
+    </svg>
+  )
+}
+
+export default function PatientsScreen({ lang = "en", onBack, onRegisterNew, onOpenConsultation, onTalkToDoctor }) {
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
@@ -471,6 +480,35 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew, onO
                       ✓ {assignSuccess}
                     </p>
                   )}
+                </div>
+              )}
+
+              {/* ASHA -> Talk to Doctor CTA */}
+              {!isDoctor && (
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const patientData = {
+                        ...selected,
+                        ...(selectedDetails || {}),
+                        patient_id: selectedDetails?.patient_id || selected.id,
+                        id: selectedDetails?.patient_id || selected.id,
+                        name: selectedDetails?.full_name || selected.name,
+                        full_name: selectedDetails?.full_name || selected.name,
+                        village: selectedDetails?.village || selected.village,
+                        age: selectedDetails?.age || selected.age,
+                        gender: selectedDetails?.gender || selected.gender,
+                        recentSymptoms: selectedDetails?.recent_symptoms || selected.recentSymptoms || [],
+                      }
+                      setSelected(null)
+                      onTalkToDoctor?.(patientData)
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-600/30 transition hover:bg-blue-700 active:scale-98"
+                  >
+                    <VideoIcon className="h-4.5 w-4.5" />
+                    <span>Talk to Doctor</span>
+                  </button>
                 </div>
               )}
 

@@ -3,18 +3,40 @@ import { patientT } from "../lib/patientI18n.js"
 import {
   requestConsultation,
   getPatientActiveVideoRequest,
+  getConsultationHistory,
   getAvailableDoctors,
   endConsultationCall,
   updateConsultationStatus,
-  getAuthUser,
+  getPatientAuthUser,
+  getAuthRole,
   getAuthToken,
   API_BASE_URL,
 } from "../lib/api.js"
 import { WebRTCManager } from "../lib/webrtc.js"
 
-export default function PatientCallScreen({ lang = "en", onBack }) {
+export default function PatientCallScreen({ patient, lang = "en", onBack }) {
   const t = patientT(lang)
-  const authUser = getAuthUser()
+  const authUser = getPatientAuthUser()
+  const role = getAuthRole()
+  const isAsha = role === "asha"
+
+  // Dynamically resolve target patient details
+  const targetPatientId =
+    patient?.patient_id ||
+    patient?.id ||
+    (!isAsha ? authUser?.patient_id || authUser?.id : null) ||
+    null
+
+  const targetPatientName =
+    patient?.full_name ||
+    patient?.name ||
+    (!isAsha ? authUser?.full_name || authUser?.name : null) ||
+    ""
+
+  const targetPatientVillage =
+    patient?.village ||
+    (!isAsha ? authUser?.village : null) ||
+    ""
 
   // Stages: 'request' | 'waiting' | 'accepted' | 'in_call' | 'ended'
   const [stage, setStage] = useState("request")
@@ -42,7 +64,7 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
   const [permissionError, setPermissionError] = useState(null)
   const [doctorJoined, setDoctorJoined] = useState(false)
 
-  // 1. Initial Load: Fetch available doctors and check for active existing request (Zero automatic creation)
+  // 1. Initial Load: Fetch available doctors and check for active existing request
   useEffect(() => {
     let isMounted = true
 
@@ -51,9 +73,25 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
         return
       }
       try {
+        const docsPromise = getAvailableDoctors()
+        let activeReqPromise
+        if (isAsha) {
+          activeReqPromise = getConsultationHistory().then((history) => {
+            if (Array.isArray(history)) {
+              return history.find(
+                (c) => (targetPatientId && c.patient_id === targetPatientId) &&
+                       ["requested", "accepted", "in_progress"].includes(c.status)
+              ) || null
+            }
+            return null
+          })
+        } else {
+          activeReqPromise = getPatientActiveVideoRequest()
+        }
+
         const [docsRes, activeReq] = await Promise.allSettled([
-          getAvailableDoctors(),
-          getPatientActiveVideoRequest(),
+          docsPromise,
+          activeReqPromise,
         ])
 
         if (!isMounted) return
@@ -68,9 +106,7 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
           setActiveConsultation(req)
           if (req.status === "requested") {
             setStage("waiting")
-          } else if (req.status === "accepted") {
-            setStage("accepted")
-          } else if (req.status === "in_progress") {
+          } else if (req.status === "accepted" || req.status === "in_progress") {
             setStage("accepted")
           }
         }
@@ -83,7 +119,7 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [isAsha, targetPatientId])
 
   // 2. Polling for Doctor Acceptance during 'waiting' stage
   useEffect(() => {
@@ -91,7 +127,19 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
 
     const intervalId = setInterval(async () => {
       try {
-        const activeReq = await getPatientActiveVideoRequest()
+        let activeReq = null
+        if (isAsha) {
+          const history = await getConsultationHistory()
+          if (Array.isArray(history)) {
+            activeReq = history.find(
+              (c) => (c.consultation_id === activeConsultation?.consultation_id || (targetPatientId && c.patient_id === targetPatientId)) &&
+                     ["requested", "accepted", "in_progress", "rejected"].includes(c.status)
+            )
+          }
+        } else {
+          activeReq = await getPatientActiveVideoRequest()
+        }
+
         if (activeReq) {
           setActiveConsultation(activeReq)
           if (activeReq.status === "accepted" || activeReq.status === "in_progress") {
@@ -107,7 +155,7 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
     }, 2500)
 
     return () => clearInterval(intervalId)
-  }, [stage])
+  }, [stage, isAsha, activeConsultation?.consultation_id, targetPatientId])
 
   // 3. Call Duration Timer during active call
   useEffect(() => {
@@ -118,22 +166,40 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
     return () => clearInterval(timerId)
   }, [stage])
 
-  // 4. Handle Patient Requesting Consultation (Explicit User Click Only)
+  // 4. Handle Consultation Request (Explicit User Click Only)
   const handleSendRequest = async () => {
+    if (isAsha && !targetPatientId) {
+      setRequestError("Patient information is missing. Please select a patient again.")
+      return
+    }
+
     setRequesting(true)
     setRequestError(null)
     try {
-      const selectedDoc = doctorsList.find((d) => d.doctor_id === selectedDoctorId)
-      const res = await requestConsultation({
+      const symptomsList = Array.isArray(patient?.recentSymptoms)
+        ? patient.recentSymptoms.map((s) => (typeof s === "string" ? s : s.description || (s.symptoms && s.symptoms.join(", ")) || "")).filter(Boolean)
+        : patient?.condition
+        ? [patient.condition]
+        : authUser?.condition
+        ? [authUser.condition]
+        : []
+
+      const payload = {
         doctor_id: selectedDoctorId,
-        reason: reason.trim() || "Video consultation request",
+        reason: reason.trim() || "Medical consultation & symptom evaluation",
         urgency: urgency,
-        symptoms: authUser?.condition ? [authUser.condition] : [],
-      })
+        symptoms: symptomsList,
+      }
+
+      if (targetPatientId) {
+        payload.patient_id = targetPatientId
+      }
+
+      const res = await requestConsultation(payload)
 
       if (res) {
         setActiveConsultation(res)
-        if (res.status === "accepted") {
+        if (res.status === "accepted" || res.status === "in_progress") {
           setStage("accepted")
         } else {
           setStage("waiting")
@@ -335,7 +401,7 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
-  const doctorDisplayName = activeConsultation?.doctor_name || doctorsList.find((d) => d.doctor_id === selectedDoctorId)?.full_name || "Dr. Ramesh Gupta"
+  const doctorDisplayName = activeConsultation?.doctor_name || doctorsList.find((d) => d.doctor_id === selectedDoctorId)?.full_name || "Dr Arvind Verma"
 
   return (
     <div className="flex min-h-dvh w-full flex-col bg-slate-900 text-white select-none">
@@ -365,6 +431,29 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
               </span>
             </div>
 
+            {/* Selected Patient Banner (Dynamic Display for ASHA and Patient) */}
+            {targetPatientName && (
+              <div className="mt-4 flex items-center justify-between rounded-2xl border border-blue-500/30 bg-blue-950/40 p-3.5">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600/30 text-blue-400 font-bold text-sm">
+                    {targetPatientName.charAt(0)}
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-blue-300 font-semibold uppercase tracking-wider">Patient</span>
+                      {targetPatientVillage && (
+                        <span className="text-[11px] text-slate-400">&bull; {targetPatientVillage}</span>
+                      )}
+                    </div>
+                    <p className="font-bold text-sm text-white">{targetPatientName}</p>
+                  </div>
+                </div>
+                <span className="font-mono text-xs font-bold text-blue-400 bg-blue-900/50 px-2.5 py-1 rounded-lg border border-blue-700/40">
+                  {targetPatientId}
+                </span>
+              </div>
+            )}
+
             {/* Doctor Picker */}
             <div className="mt-6">
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
@@ -374,9 +463,9 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
                 {(doctorsList.length > 0
                   ? doctorsList
                   : [
-                      { doctor_id: "DOC-101", full_name: "Dr. Ramesh Gupta", specialization: "General Physician & AYUSH Consultant" },
+                      { doctor_id: "DOC-101", full_name: "Dr Arvind Verma", specialization: "General Physician & AYUSH Consultant" },
+                      { doctor_id: "DOC-501", full_name: "Dr Arvind Verma", specialization: "General Medicine" },
                       { doctor_id: "DOC-102", full_name: "Dr. Anjali Rao", specialization: "Pediatrics & Child Health" },
-                      { doctor_id: "DOC-501", full_name: "Dr. Arvind Varma", specialization: "General Medicine" },
                     ]
                 ).map((doc) => {
                   const isSelected = selectedDoctorId === doc.doctor_id
@@ -393,7 +482,7 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
                     >
                       <div className="flex items-center gap-3">
                         <span className={`flex h-11 w-11 items-center justify-center rounded-xl font-bold text-sm ${isSelected ? "bg-blue-600 text-white" : "bg-slate-700 text-slate-300"}`}>
-                          {doc.full_name.replace("Dr. ", "").charAt(0)}
+                          {doc.full_name.replace(/^Dr\.?\s*/i, "").charAt(0)}
                         </span>
                         <div>
                           <p className="font-bold text-sm text-white">{doc.full_name}</p>
@@ -470,6 +559,14 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
       {stage === "waiting" && (
         <div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-between p-6 text-center">
           <div className="w-full flex items-center justify-between pb-6 border-b border-slate-800">
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-800 text-slate-400 hover:text-white transition"
+              title="Back"
+            >
+              <BackIcon className="h-5 w-5" />
+            </button>
             <span className="text-xs font-mono font-bold text-blue-400">
               {activeConsultation?.consultation_id || "REQUEST"}
             </span>
@@ -488,6 +585,11 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
             </div>
 
             <h2 className="text-xl font-bold text-white">Video consultation request sent</h2>
+            {targetPatientName && (
+              <p className="mt-1 text-xs font-semibold text-blue-300">
+                Patient: {targetPatientName} ({targetPatientId})
+              </p>
+            )}
             <p className="mt-2 text-sm text-slate-400 max-w-xs">
               Waiting for <strong className="text-white">{doctorDisplayName}</strong> to accept your consultation request.
             </p>
@@ -516,6 +618,14 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
       {stage === "accepted" && (
         <div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-between p-6 text-center">
           <div className="w-full flex items-center justify-between pb-6 border-b border-slate-800">
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-800 text-slate-400 hover:text-white transition"
+              title="Back"
+            >
+              <BackIcon className="h-5 w-5" />
+            </button>
             <span className="text-xs font-mono font-bold text-emerald-400">
               {activeConsultation?.consultation_id || "READY"}
             </span>
@@ -530,6 +640,11 @@ export default function PatientCallScreen({ lang = "en", onBack }) {
             </span>
 
             <h2 className="text-2xl font-bold text-white">Doctor accepted your request!</h2>
+            {targetPatientName && (
+              <p className="mt-1 text-xs font-semibold text-emerald-300">
+                Patient: {targetPatientName} ({targetPatientId})
+              </p>
+            )}
             <p className="mt-2 text-sm text-slate-300">
               <strong className="text-white">{doctorDisplayName}</strong> is ready for your clinical audio/video consultation.
             </p>

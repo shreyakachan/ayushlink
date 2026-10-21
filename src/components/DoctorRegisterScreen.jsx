@@ -151,7 +151,7 @@ export default function DoctorRegisterScreen({ lang = "en", onLangChange, onBack
             <input
               id="doc_fullName"
               type="text"
-              placeholder="Dr. Ramesh Gupta"
+              placeholder="Dr Arvind Verma"
               value={form.fullName}
               onChange={(e) => update("fullName", e.target.value)}
               className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-100"

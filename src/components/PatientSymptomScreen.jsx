@@ -2,7 +2,7 @@ import { useState } from "react"
 import { patientT } from "../lib/patientI18n.js"
 import useAudioRecorder from "../hooks/useAudioRecorder.js"
 import { saveVoiceNote } from "../lib/audioStore.js"
-import { submitPatientSymptoms, getAuthUser } from "../lib/api.js"
+import { submitPatientSymptoms, getPatientAuthUser } from "../lib/api.js"
 import { saveOfflineItem, generateClientId } from "../lib/offlineDb.js"
 
 function BackIcon({ className }) {
@@ -135,15 +135,15 @@ export default function PatientSymptomScreen({ lang = "en", onBack }) {
 
     // PATH A: If browser is offline, save to IndexedDB pending queue immediately and do not attempt network request
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      const authUser = getAuthUser()
+      const authUser = getPatientAuthUser()
       await saveOfflineItem({
         type: "symptom_report",
         client_id: offlineId,
         client_created_at: nowIso,
         payload: {
           ...symptomPayload,
-          patient_id: authUser?.patient_id || authUser?.sub || "self",
-          patient_name: authUser?.full_name || authUser?.name || "Patient",
+          patient_id: authUser?.patient_id || "P-4559",
+          patient_name: (authUser && !authUser.doctor_id && !authUser.worker_id) ? (authUser.full_name || authUser.name || "Shreya") : "Shreya",
           village: authUser?.village || "Chandapur",
         },
       })
@@ -156,15 +156,15 @@ export default function PatientSymptomScreen({ lang = "en", onBack }) {
       await submitPatientSymptoms(symptomPayload)
       setSubmitState("success")
     } catch (err) {
-      const authUser = getAuthUser()
+      const authUser = getPatientAuthUser()
       await saveOfflineItem({
         type: "symptom_report",
         client_id: offlineId,
         client_created_at: nowIso,
         payload: {
           ...symptomPayload,
-          patient_id: authUser?.patient_id || authUser?.sub || "self",
-          patient_name: authUser?.full_name || authUser?.name || "Patient",
+          patient_id: authUser?.patient_id || "P-4559",
+          patient_name: (authUser && !authUser.doctor_id && !authUser.worker_id) ? (authUser.full_name || authUser.name || "Shreya") : "Shreya",
           village: authUser?.village || "Chandapur",
         },
       })

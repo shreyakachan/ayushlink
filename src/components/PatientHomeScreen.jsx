@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { PATIENT_LANGUAGES, patientT } from "../lib/patientI18n.js"
 import PatientListenButton from "./PatientListenButton.jsx"
-import { getPatientMedicalRecord, getAuthUser } from "../lib/api.js"
+import { getPatientMedicalRecord, getPatientAuthUser } from "../lib/api.js"
 
 /**
  * AyushLink — Patient Home Screen (redesigned)
@@ -33,14 +33,15 @@ export default function PatientHomeScreen({
   onBack,
 }) {
   const [patient, setPatient] = useState(() => {
-    const auth = getAuthUser()
+    const auth = getPatientAuthUser()
+    const isPropRealPatient = propPatient && !propPatient.doctor_id && !propPatient.worker_id && propPatient.role !== "doctor"
     return {
-      name: propPatient?.full_name || propPatient?.name || auth?.full_name || auth?.name || "Patient",
-      patientId: propPatient?.patient_id || auth?.patient_id || "",
-      age: propPatient?.age || auth?.age || "",
-      gender: propPatient?.gender || auth?.gender || "",
-      village: propPatient?.village || auth?.village || "",
-      abhaId: propPatient?.abhaId || auth?.abha_id || "",
+      name: (isPropRealPatient && (propPatient.full_name || propPatient.name)) || auth?.full_name || auth?.name || "Shreya",
+      patientId: (isPropRealPatient && propPatient.patient_id) || auth?.patient_id || "P-4559",
+      age: (isPropRealPatient && propPatient.age) || auth?.age || "",
+      gender: (isPropRealPatient && propPatient.gender) || auth?.gender || "",
+      village: (isPropRealPatient && propPatient.village) || auth?.village || "Chandapur",
+      abhaId: (isPropRealPatient && (propPatient.abhaId || propPatient.abha_id)) || auth?.abha_id || "",
     }
   })
   const [caseStatus, setCaseStatus] = useState(initialCaseStatus)
@@ -48,7 +49,7 @@ export default function PatientHomeScreen({
   useEffect(() => {
     async function loadData() {
       try {
-        const authUser = getAuthUser()
+        const authUser = getPatientAuthUser()
         if (authUser?.full_name || authUser?.name) {
           setPatient((p) => ({
             ...p,
@@ -67,11 +68,11 @@ export default function PatientHomeScreen({
         const record = await getPatientMedicalRecord()
         if (record) {
           setPatient({
-            name: record.full_name || authUser?.full_name || authUser?.name || "Patient",
-            patientId: record.patient_id || authUser?.patient_id || "",
+            name: record.full_name || authUser?.full_name || authUser?.name || "Shreya",
+            patientId: record.patient_id || authUser?.patient_id || "P-4559",
             age: record.age || "",
             gender: record.gender ? record.gender.charAt(0).toUpperCase() + record.gender.slice(1) : "",
-            village: record.village || "",
+            village: record.village || "Chandapur",
             abhaId: record.abha_id || "",
           })
           if (record.status) {

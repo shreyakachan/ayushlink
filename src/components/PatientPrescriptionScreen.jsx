@@ -22,7 +22,7 @@ function buildSpokenSummary(lang, rx) {
   const meds = (rx.medicines || [])
     .map((m) => `${m.name}, ${m.dosage || m.frequency || ""}, ${t.forDuration} ${m.duration || ""}`)
     .join(". ")
-  let summary = `${t.spokenIntro} ${rx.doctorName || "Doctor"}.`
+  let summary = `${t.spokenIntro} ${rx.doctorName || "Dr Arvind Verma"}.`
   if (rx.diagnosis) {
     summary += ` ${t.diagnosisLabel}: ${rx.diagnosis}.`
   }
@@ -42,7 +42,7 @@ function formatPrescription(latest) {
   if (!latest) return null
   return {
     id: latest.prescription_id || latest.id || "RX-1001",
-    doctorName: latest.doctor_name || latest.doctorName || "Doctor",
+    doctorName: latest.doctor_name || latest.doctorName || "Dr Arvind Verma",
     date: latest.date
       ? new Date(latest.date).toLocaleDateString("en-IN", {
           day: "2-digit",

@@ -136,7 +136,7 @@ export default function AshaRegisterScreen({ lang = "en", onLangChange, onBack, 
               type="text"
               value={form.fullName}
               onChange={(e) => update("fullName", e.target.value)}
-              placeholder="e.g. Meena Ingle"
+              placeholder="e.g. Pooja Sharma"
               className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-800 shadow-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-100 focus:outline-none"
             />
             {errors.fullName && <p className="mt-1 text-xs text-red-600">{errors.fullName}</p>}

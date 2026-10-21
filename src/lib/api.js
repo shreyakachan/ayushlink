@@ -56,12 +56,81 @@ export function getAuthRole() {
   }
 }
 
+/**
+ * Retrieve patient user session strictly separated from doctor and ASHA profiles.
+ * Guaranteed to never return a doctor or ASHA identity for patient operations.
+ */
+export function getPatientAuthUser() {
+  try {
+    const role = getAuthRole()
+    if (role === "patient") {
+      const u = getAuthUser()
+      if (u && !u.doctor_id && !u.worker_id && u.role !== "doctor" && u.role !== "asha") {
+        return u
+      }
+    }
+    const raw = localStorage.getItem("ayushlink_patient_user")
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && !parsed.doctor_id && !parsed.worker_id && parsed.role !== "doctor") return parsed
+    }
+    const cacheRaw = localStorage.getItem(ACCOUNTS_CACHE_KEY)
+    if (cacheRaw) {
+      const cache = JSON.parse(cacheRaw)
+      const pEntry = cache["patient_9324998108"] || cache["patient_p-4559"] || Object.values(cache).find(e => e.role === "patient" && !e.user?.doctor_id && !e.user?.worker_id)
+      if (pEntry?.user) return pEntry.user
+    }
+  } catch {}
+  return {
+    patient_id: "P-4559",
+    full_name: "Shreya",
+    name: "Shreya",
+    phone: "9324998108",
+    village: "Chandapur",
+    role: "patient",
+  }
+}
+
+/**
+ * Retrieve patient JWT token strictly separated from other roles.
+ */
+export function getPatientAuthToken() {
+  try {
+    const role = getAuthRole()
+    if (role === "patient") {
+      const tok = getAuthToken()
+      if (tok) return tok
+    }
+    const tok = localStorage.getItem("ayushlink_patient_token")
+    if (tok) return tok
+    const cacheRaw = localStorage.getItem(ACCOUNTS_CACHE_KEY)
+    if (cacheRaw) {
+      const cache = JSON.parse(cacheRaw)
+      const pEntry = cache["patient_9324998108"] || cache["patient_p-4559"] || Object.values(cache).find(e => e.role === "patient" && !e.user?.doctor_id)
+      if (pEntry?.token) return pEntry.token
+    }
+  } catch {}
+  return null
+}
+
 export function setAuthSession(token, user, role) {
   try {
     if (token) localStorage.setItem(TOKEN_KEY, token)
     if (user) localStorage.setItem(USER_KEY, JSON.stringify(user))
     if (role) localStorage.setItem(ROLE_KEY, role)
-    if (user?.patient_id) localStorage.setItem("ayushlink_current_patient_id", user.patient_id)
+    
+    // Scoped role storage to guarantee isolation between Patient, ASHA, and Doctor
+    if (role === "patient" && user) {
+      if (token) localStorage.setItem("ayushlink_patient_token", token)
+      localStorage.setItem("ayushlink_patient_user", JSON.stringify(user))
+      if (user.patient_id) localStorage.setItem("ayushlink_current_patient_id", user.patient_id)
+    } else if (role === "doctor" && user) {
+      if (token) localStorage.setItem("ayushlink_doctor_token", token)
+      localStorage.setItem("ayushlink_doctor_user", JSON.stringify(user))
+    } else if (role === "asha" && user) {
+      if (token) localStorage.setItem("ayushlink_asha_token", token)
+      localStorage.setItem("ayushlink_asha_user", JSON.stringify(user))
+    }
 
     // Store in offline accounts cache for offline authentication reuse
     const tokenInfo = checkTokenExpiry(token)
@@ -762,14 +831,27 @@ export async function markNotificationRead(notificationId, role = null) {
  * @returns {Promise<Object>} EmergencyAlertResponse
  */
 export async function sendEmergencySOS(emergencyData = {}) {
+  const patientUser = getPatientAuthUser()
   const payload = {
+    patient_id: emergencyData.patient_id || emergencyData.patientId || patientUser?.patient_id || "P-4559",
+    patient_name: emergencyData.patient_name || emergencyData.patientName || (patientUser && !patientUser.doctor_id && !patientUser.worker_id ? patientUser.full_name || patientUser.name : "Shreya") || "Shreya",
+    village: emergencyData.village || patientUser?.village || "Chandapur",
     emergency_type: emergencyData.emergency_type || emergencyData.emergencyType || "general_sos",
     emergency_notes: emergencyData.emergency_notes || emergencyData.emergencyNotes || null,
     gps_coordinates: emergencyData.gps_coordinates || emergencyData.gpsCoordinates || null,
     simulated_telemetry: emergencyData.simulated_telemetry || emergencyData.simulatedTelemetry || null,
+    offline_id: emergencyData.offline_id || emergencyData.offlineId || null,
   }
+
+  const headers = {}
+  const patientToken = getPatientAuthToken()
+  if (patientToken && getAuthRole() !== "patient") {
+    headers["Authorization"] = `Bearer ${patientToken}`
+  }
+
   return await apiFetch("/emergency/sos", {
     method: "POST",
+    headers,
     body: payload,
   })
 }
