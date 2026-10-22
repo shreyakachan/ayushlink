@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { ASHA_LANGUAGES, ashaT } from "../lib/ashaI18n.js"
-import { getAuthUser, getAshaCases, getActiveEmergencyAlerts, updateEmergencyAlertStatus, getNotifications } from "../lib/api.js"
+import { getAuthUser, getAshaAuthUser, getAshaCases, getActiveEmergencyAlerts, updateEmergencyAlertStatus, getNotifications } from "../lib/api.js"
 import { getPendingItems } from "../lib/offlineDb.js"
 import { unlockAudioContext, startEmergencySiren, stopEmergencySiren, isSirenPlaying } from "../lib/emergencySiren.js"
 import useOnlineStatus from "../hooks/useOnlineStatus.js"
@@ -98,12 +98,10 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
 
   useEffect(() => {
     async function loadDashboard() {
-      const auth = getAuthUser()
+      const auth = getAshaAuthUser() || getAuthUser()
       const role = localStorage.getItem("ayushlink_role")
-      if (role === "asha" && auth && (auth.full_name || auth.name)) {
+      if ((role === "asha" || auth?.worker_id || auth?.role === "asha") && auth && (auth.full_name || auth.name)) {
         setWorkerName(auth.full_name || auth.name)
-      } else if (auth?.worker_id || auth?.role === "asha") {
-        setWorkerName(auth.full_name || "Pooja Sharma")
       } else {
         setWorkerName("Pooja Sharma")
       }
@@ -258,6 +256,7 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
       checkEmergencies()
     }
     window.addEventListener("focus", handleFocus)
+    window.addEventListener("online", checkEmergencies)
     window.addEventListener("ayushlink:sync_complete", checkEmergencies)
     window.addEventListener("ayushlink:pending_updated", checkEmergencies)
 
@@ -265,6 +264,7 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
       isMounted = false
       if (pollTimer) clearInterval(pollTimer)
       window.removeEventListener("focus", handleFocus)
+      window.removeEventListener("online", checkEmergencies)
       window.removeEventListener("ayushlink:sync_complete", checkEmergencies)
       window.removeEventListener("ayushlink:pending_updated", checkEmergencies)
       stopEmergencySiren()
@@ -344,14 +344,6 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
       desc: `${cases.length} ${t.dashboard.recordsSaved || "records saved"}`,
       Icon: UsersIcon,
       tone: "sky",
-    },
-    {
-      id: "ai",
-      title: t.dashboard.aiSymptomChecker,
-      desc: t.dashboard.aiSymptomDesc,
-      Icon: SparklesIcon,
-      tone: "indigo",
-      badge: "AI",
     },
     {
       id: "prescriptions",
@@ -996,15 +988,6 @@ function UserPlusIcon({ className }) {
       <circle cx="9" cy="7" r="4" />
       <path d="M19 8v6" />
       <path d="M22 11h-6" />
-    </svg>
-  )
-}
-
-function SparklesIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
-      <path d="M12 8a4 4 0 0 0 4 4 4 4 0 0 0-4 4 4 4 0 0 0-4-4 4 4 0 0 0 4-4z" />
     </svg>
   )
 }

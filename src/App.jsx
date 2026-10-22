@@ -9,7 +9,6 @@ import DoctorHomeScreen from "./components/DoctorHomeScreen.jsx"
 import RegisterPatient from "./components/RegisterPatient.jsx"
 import ABHAScannerScreen from "./components/ABHAScannerScreen.jsx"
 import PrescriptionScreen from "./components/PrescriptionScreen.jsx"
-import AISymptomChecker from "./components/AISymptomChecker.jsx"
 import PatientsScreen from "./components/PatientsScreen.jsx"
 import PendingSyncScreen from "./components/PendingSyncScreen.jsx"
 import NotificationsScreen from "./components/NotificationsScreen.jsx"
@@ -57,7 +56,6 @@ const VALID_SCREENS = new Set([
   "register",
   "abha-scan",
   "prescriptions",
-  "ai",
   "patients",
   "doctor-consultation",
   "sync",
@@ -75,7 +73,6 @@ export default function App() {
   const [scannedPatient, setScannedPatient] = useState(null)
   const [consultationPatient, setConsultationPatient] = useState(null)
   const [callPatient, setCallPatient] = useState(null)
-  const [aiPatient, setAiPatient] = useState(null)
 
   const setScreen = (newScreen) => {
     if (VALID_SCREENS.has(newScreen)) {
@@ -141,7 +138,6 @@ export default function App() {
         setScreen("prescriptions")
       }
     }
-    if (id === "ai") setScreen("ai")
     if (id === "patients") setScreen("patients")
     if (id === "consultations" || id === "consultation") {
       if (consultationPatient) {
@@ -370,16 +366,6 @@ export default function App() {
       {activeScreen === "prescriptions" && (
         <PrescriptionScreen lang={ashaLang} onBack={goToRoleHome} />
       )}
-      {activeScreen === "ai" && (
-        <AISymptomChecker
-          patient={aiPatient}
-          lang={ashaLang}
-          onLangChange={setAshaLang}
-          onBack={goToRoleHome}
-          onReferPHC={() => setScreen("patients")}
-          onEmergency={() => setScreen("sos")}
-        />
-      )}
       {activeScreen === "patients" && (
         <PatientsScreen
           lang={ashaLang}
@@ -392,10 +378,6 @@ export default function App() {
             setCallPatient(p)
             setCallSessionId((n) => n + 1)
             setScreen("patient-call")
-          }}
-          onCheckSymptoms={(p) => {
-            setAiPatient(p)
-            setScreen("ai")
           }}
           onRegisterNew={() => setScreen("register")}
         />

@@ -125,7 +125,7 @@ async function run() {
   const patientToken = patLogin.access_token
   console.log(`[OK] Patient logged in: ${patientId} (${patLogin.patient.full_name})`)
 
-  const ashaLogin = await loginAsha("9823088881", "AshaPassword123")
+  const ashaLogin = await loginAsha("9837373773", "123456")
   const ashaWorkerId = ashaLogin.asha_worker.worker_id
   const ashaToken = ashaLogin.access_token
   console.log(`[OK] ASHA Worker logged in: ${ashaWorkerId} (${ashaLogin.asha_worker.full_name})`)

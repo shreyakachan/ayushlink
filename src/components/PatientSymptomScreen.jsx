@@ -1,7 +1,5 @@
 import { useState } from "react"
 import { patientT } from "../lib/patientI18n.js"
-import useAudioRecorder from "../hooks/useAudioRecorder.js"
-import { saveVoiceNote } from "../lib/audioStore.js"
 import { submitPatientSymptoms, getPatientAuthUser } from "../lib/api.js"
 import { saveOfflineItem, generateClientId } from "../lib/offlineDb.js"
 
@@ -13,29 +11,6 @@ function BackIcon({ className }) {
     </svg>
   )
 }
-function MicIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="9" y="2" width="6" height="12" rx="3" />
-      <path d="M5 10a7 7 0 0 0 14 0" />
-      <path d="M12 17v5" />
-    </svg>
-  )
-}
-function StopIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <rect x="6" y="6" width="12" height="12" rx="2" />
-    </svg>
-  )
-}
-function TrashIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-    </svg>
-  )
-}
 function CheckIcon({ className }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -44,28 +19,14 @@ function CheckIcon({ className }) {
   )
 }
 
-// Map the recorder hook's fixed English error strings to a translated
-// message, without needing to modify the shared hook (used by the ASHA
-// symptom checker too).
-function translateMicError(rawError, t) {
-  if (!rawError) return t.micGenericError
-  if (rawError.includes("isn't supported")) return t.micUnsupported
-  if (rawError.includes("permission was denied")) return t.micPermissionDenied
-  if (rawError.includes("No microphone")) return t.micNotFound
-  return t.micGenericError
-}
-
 export default function PatientSymptomScreen({ lang = "en", onBack }) {
   const t = patientT(lang)
 
   const [description, setDescription] = useState("")
   const [duration, setDuration] = useState(null)
   const [severity, setSeverity] = useState(null)
-  const [voiceNote, setVoiceNote] = useState(null) // { durationSeconds }
   const [validationError, setValidationError] = useState(false)
   const [submitState, setSubmitState] = useState("idle") // idle | submitting | success | error
-
-  const recorder = useAudioRecorder()
 
   const durationOptions = [
     { id: "today", label: t.durationToday },
@@ -79,75 +40,59 @@ export default function PatientSymptomScreen({ lang = "en", onBack }) {
     { id: "severe", label: t.severitySevere },
   ]
 
-  const handleRecordToggle = async () => {
-    if (recorder.state === "recording") {
-      const result = await recorder.stop()
-      if (result) {
-        try {
-          await saveVoiceNote({ ...result, language: lang, symptomsSnapshot: description })
-          setVoiceNote({ durationSeconds: result.durationSeconds })
-        } catch {
-          setSubmitState("error")
-        }
-      }
-    } else if (recorder.state === "idle" || recorder.state === "error") {
-      await recorder.start()
-    }
-  }
-
-  const removeVoiceNote = () => {
-    setVoiceNote(null)
-  }
-
   const clearForm = () => {
     setDescription("")
     setDuration(null)
     setSeverity(null)
-    setVoiceNote(null)
     setValidationError(false)
     setSubmitState("idle")
-    recorder.cancel()
   }
 
   const handleSubmit = async () => {
-    if (!description.trim() && !voiceNote) {
+    if (!description.trim()) {
       setValidationError(true)
       return
     }
     setValidationError(false)
     setSubmitState("submitting")
 
-    const symptomsList = description.trim()
-      ? description.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean)
-      : ["Reported via voice note"]
+    const symptomsList = description
+      .split(/[,;\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
 
     const offlineId = generateClientId("SYM-OFFLINE")
     const nowIso = new Date().toISOString()
     const symptomPayload = {
       symptoms: symptomsList.length ? symptomsList : ["General weakness / discomfort"],
-      description: description.trim() || "Voice note symptom assessment submitted",
+      description: description.trim(),
       severity: severity || "moderate",
       duration: duration || "today",
-      notes: voiceNote ? `Voice note duration: ${voiceNote.durationSeconds}s` : null,
+      notes: null,
       offline_id: offlineId,
       client_created_at: nowIso,
     }
 
     // PATH A: If browser is offline, save to IndexedDB pending queue immediately and do not attempt network request
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      const authUser = getPatientAuthUser()
-      await saveOfflineItem({
-        type: "symptom_report",
-        client_id: offlineId,
-        client_created_at: nowIso,
-        payload: {
-          ...symptomPayload,
-          patient_id: authUser?.patient_id || "P-4559",
-          patient_name: (authUser && !authUser.doctor_id && !authUser.worker_id) ? (authUser.full_name || authUser.name || "Shreya") : "Shreya",
-          village: authUser?.village || "Chandapur",
-        },
-      })
-      setSubmitState("success")
+      try {
+        const authUser = getPatientAuthUser()
+        await saveOfflineItem({
+          type: "symptom_report",
+          client_id: offlineId,
+          client_created_at: nowIso,
+          payload: {
+            ...symptomPayload,
+            patient_id: authUser?.patient_id || "P-4559",
+            patient_name: (authUser && !authUser.doctor_id && !authUser.worker_id) ? (authUser.full_name || authUser.name || "Shreya") : "Shreya",
+            village: authUser?.village || "Chandapur",
+          },
+        })
+        setSubmitState("success")
+      } catch (offlineErr) {
+        console.error("Failed to queue offline symptom:", offlineErr)
+        setSubmitState("error")
+      }
       return
     }
 
@@ -156,19 +101,24 @@ export default function PatientSymptomScreen({ lang = "en", onBack }) {
       await submitPatientSymptoms(symptomPayload)
       setSubmitState("success")
     } catch (err) {
-      const authUser = getPatientAuthUser()
-      await saveOfflineItem({
-        type: "symptom_report",
-        client_id: offlineId,
-        client_created_at: nowIso,
-        payload: {
-          ...symptomPayload,
-          patient_id: authUser?.patient_id || "P-4559",
-          patient_name: (authUser && !authUser.doctor_id && !authUser.worker_id) ? (authUser.full_name || authUser.name || "Shreya") : "Shreya",
-          village: authUser?.village || "Chandapur",
-        },
-      })
-      setSubmitState("success")
+      try {
+        const authUser = getPatientAuthUser()
+        await saveOfflineItem({
+          type: "symptom_report",
+          client_id: offlineId,
+          client_created_at: nowIso,
+          payload: {
+            ...symptomPayload,
+            patient_id: authUser?.patient_id || "P-4559",
+            patient_name: (authUser && !authUser.doctor_id && !authUser.worker_id) ? (authUser.full_name || authUser.name || "Shreya") : "Shreya",
+            village: authUser?.village || "Chandapur",
+          },
+        })
+        setSubmitState("success")
+      } catch (offlineErr) {
+        console.error("Failed to submit symptoms and offline queuing failed:", offlineErr)
+        setSubmitState("error")
+      }
     }
   }
 
@@ -231,47 +181,6 @@ export default function PatientSymptomScreen({ lang = "en", onBack }) {
           <p className="mt-2 text-xs text-slate-400">
             {t.symptomsExampleLabel} <span className="italic">{t.symptomsExampleText}</span>
           </p>
-
-          {/* Voice note */}
-          <div className="mt-4 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleRecordToggle}
-              aria-label={recorder.state === "recording" ? t.stopRecording : t.recordVoiceNote}
-              disabled={recorder.state === "requesting" || recorder.state === "processing"}
-              className={`inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60
-                ${recorder.state === "recording" ? "bg-red-600 text-white hover:bg-red-700" : "bg-blue-50 text-blue-700 hover:bg-blue-100"}`}
-            >
-              {recorder.state === "recording" ? <StopIcon className="h-4 w-4" /> : <MicIcon className="h-4 w-4" />}
-              {recorder.state === "recording" ? t.stopRecording : t.recordVoiceNote}
-            </button>
-            {recorder.state === "recording" && (
-              <span className="inline-flex items-center gap-1.5 text-sm text-slate-500">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-                {t.recording}
-              </span>
-            )}
-          </div>
-
-          {recorder.error && (
-            <p className="mt-2 text-xs text-red-600">{translateMicError(recorder.error, t)}</p>
-          )}
-
-          {voiceNote && (
-            <div className="mt-3 flex items-center justify-between rounded-2xl bg-emerald-50 px-4 py-3">
-              <span className="text-sm font-medium text-emerald-700">
-                {t.voiceNoteSaved} ({voiceNote.durationSeconds}s)
-              </span>
-              <button
-                type="button"
-                onClick={removeVoiceNote}
-                aria-label={t.removeVoiceNote}
-                className="flex h-8 w-8 items-center justify-center rounded-xl text-emerald-700 transition hover:bg-emerald-100"
-              >
-                <TrashIcon className="h-4 w-4" />
-              </button>
-            </div>
-          )}
         </section>
 
         {/* Duration */}

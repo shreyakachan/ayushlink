@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { patientT } from "../lib/patientI18n.js"
 import { sendEmergencySOS, getAuthUser, getPatientAuthUser } from "../lib/api.js"
-import { saveOfflineItem, generateClientId } from "../lib/offlineDb.js"
+import { saveOfflineItem, getPendingItems, markItemSynced, generateClientId } from "../lib/offlineDb.js"
 import { buildEmergencyPacket, simulateTransmission, LORA_STAGES } from "../lib/loraSimulator.js"
 
 /**
@@ -152,11 +152,72 @@ export default function EmergencySOSScreen({ lang = "en", onBack }) {
     }
   }, [])
 
+  // When an SOS is in offline queued state, listen for reconnection / sync to update to live delivery
+  useEffect(() => {
+    if (status !== "sent" || !emergencyResult?.is_offline) return
+
+    let active = true
+
+    const trySyncScreenAlert = async () => {
+      if (!active || !emergencyResult?.offline_id) return
+      try {
+        const pending = await getPendingItems()
+        const myItem = pending.find((i) => i.client_id === emergencyResult.offline_id)
+        if (!myItem) {
+          // Already marked synced by background sync engine
+          if (active) {
+            setEmergencyResult((prev) => (prev ? { ...prev, is_offline: false } : prev))
+            setAckResult((prev) => (prev ? { ...prev, is_offline: false } : prev))
+          }
+          return
+        }
+        if (typeof navigator !== "undefined" && navigator.onLine) {
+          const res = await sendEmergencySOS(myItem.payload)
+          if (res && (res.alert_id || res.id)) {
+            await markItemSynced(myItem.client_id, res)
+            if (active) {
+              setEmergencyResult({
+                ...res,
+                is_offline: false,
+              })
+              setAckResult({
+                ack: true,
+                is_offline: false,
+                dispatch_ticket_id: `TKT-${res.alert_id || myItem.client_id}`,
+                packet_id: res.lora_telemetry?.packet_id || `LORA-PKT-${res.alert_id}`,
+              })
+            }
+          }
+        }
+      } catch {
+        // Will retry on next interval or online event
+      }
+    }
+
+    const onOnline = () => {
+      trySyncScreenAlert()
+    }
+    const onSyncComplete = () => {
+      trySyncScreenAlert()
+    }
+
+    window.addEventListener("online", onOnline)
+    window.addEventListener("ayushlink:sync_complete", onSyncComplete)
+    const retryInterval = setInterval(trySyncScreenAlert, 3000)
+
+    return () => {
+      active = false
+      clearInterval(retryInterval)
+      window.removeEventListener("online", onOnline)
+      window.removeEventListener("ayushlink:sync_complete", onSyncComplete)
+    }
+  }, [status, emergencyResult])
+
   /**
    * Execute Real Software LoRa Emergency Flow:
-   * 1. Check connectivity & auth context
+   * 1. Persist offline SOS to local storage queue BEFORE network delivery
    * 2. If online: POST /api/emergency/sos (auth patient) -> simulated LoRa packet -> Gateway ACK
-   * 3. If offline: Save directly to IndexedDB pending queue -> immediate offline confirmation -> auto-syncs on reconnect
+   * 3. If offline / unreachable: Keep in IndexedDB pending queue -> immediate offline confirmation -> auto-syncs on reconnect
    */
   const executeEmergencySos = async () => {
     if (isExecutingRef.current) return
@@ -191,48 +252,50 @@ export default function EmergencySOSScreen({ lang = "en", onBack }) {
       offline_id: offlineId,
     }
 
-    // PATH A: If completely offline, immediately queue locally into IndexedDB
-    if (typeof navigator !== "undefined" && !navigator.onLine) {
-      try {
-        await saveOfflineItem({
-          type: "emergency_sos",
-          client_id: offlineId,
-          client_created_at: nowIso,
-          payload: {
-            ...payload,
-            patient_id: targetPatientId,
-            patient_name: targetPatientName,
-            village: targetVillage,
-          },
-        })
-        setEmergencyResult({
-          alert_id: `SOS-OFFLINE-${offlineId.slice(-6)}`,
+    // 1. Persist the patient's offline SOS BEFORE attempting network delivery
+    try {
+      await saveOfflineItem({
+        type: "emergency_sos",
+        client_id: offlineId,
+        client_created_at: nowIso,
+        payload: {
+          ...payload,
           patient_id: targetPatientId,
           patient_name: targetPatientName,
           village: targetVillage,
-          emergency_type: "general_sos",
-          is_offline: true,
-          offline_id: offlineId,
-        })
-        setAckResult({
-          ack: true,
-          is_offline: true,
-          dispatch_ticket_id: `TKT-${offlineId}`,
-          packet_id: `OFFLINE-${offlineId}`,
-        })
-        setStatus("sent")
-      } catch (e) {
-        console.warn("Failed to store offline SOS:", e)
-        setStatus("sent")
-      } finally {
-        isExecutingRef.current = false
-      }
+        },
+      })
+    } catch (saveErr) {
+      console.warn("Could not pre-persist offline SOS to IndexedDB:", saveErr)
+    }
+
+    // PATH A: If completely offline, immediately display queued confirmation
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      setEmergencyResult({
+        alert_id: `SOS-OFFLINE-${offlineId.slice(-6)}`,
+        patient_id: targetPatientId,
+        patient_name: targetPatientName,
+        village: targetVillage,
+        emergency_type: "general_sos",
+        is_offline: true,
+        offline_id: offlineId,
+      })
+      setAckResult({
+        ack: true,
+        is_offline: true,
+        dispatch_ticket_id: `TKT-${offlineId}`,
+        packet_id: `OFFLINE-${offlineId}`,
+      })
+      setStatus("sent")
+      isExecutingRef.current = false
       return
     }
 
     // PATH B: Attempt live API submission with offline fallback on network failure
     try {
       const sosResponse = await sendEmergencySOS(payload)
+      // Confirmed by backend -> mark item synced in IndexedDB
+      await markItemSynced(offlineId, sosResponse)
       setEmergencyResult(sosResponse)
 
       // Construct Software-simulated LoRa RF packet
@@ -272,39 +335,24 @@ export default function EmergencySOSScreen({ lang = "en", onBack }) {
         return
       }
 
-      // If network is offline or request failed due to connection, save to IndexedDB queue
+      // If network is offline or request failed due to connection, item is already persisted in IndexedDB queue
       if (err.isOffline || (err.message && (err.message.includes("offline") || err.message.includes("fetch") || err.message.includes("NetworkError")))) {
-        try {
-          await saveOfflineItem({
-            type: "emergency_sos",
-            client_id: offlineId,
-            client_created_at: nowIso,
-            payload: {
-              ...payload,
-              patient_id: targetPatientId,
-              patient_name: targetPatientName,
-              village: targetVillage,
-            },
-          })
-          setEmergencyResult({
-            alert_id: `SOS-OFFLINE-${offlineId.slice(-6)}`,
-            patient_id: targetPatientId,
-            patient_name: targetPatientName,
-            village: targetVillage,
-            emergency_type: "general_sos",
-            is_offline: true,
-            offline_id: offlineId,
-          })
-          setAckResult({
-            ack: true,
-            is_offline: true,
-            dispatch_ticket_id: `TKT-${offlineId}`,
-            packet_id: `OFFLINE-${offlineId}`,
-          })
-          setStatus("sent")
-        } catch (e) {
-          setStatus("sent")
-        }
+        setEmergencyResult({
+          alert_id: `SOS-OFFLINE-${offlineId.slice(-6)}`,
+          patient_id: targetPatientId,
+          patient_name: targetPatientName,
+          village: targetVillage,
+          emergency_type: "general_sos",
+          is_offline: true,
+          offline_id: offlineId,
+        })
+        setAckResult({
+          ack: true,
+          is_offline: true,
+          dispatch_ticket_id: `TKT-${offlineId}`,
+          packet_id: `OFFLINE-${offlineId}`,
+        })
+        setStatus("sent")
       } else {
         setStatus("error")
         setErrorMessage(err.message || "Failed to transmit emergency signal. Please retry or call directly.")

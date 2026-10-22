@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { ASHA_LANGUAGES, ashaT } from "../lib/ashaI18n.js"
-import { getAuthUser, getAuthRole, getDoctorProfile } from "../lib/api.js"
+import { getAuthUser, getDoctorAuthUser, getAuthRole, getDoctorProfile } from "../lib/api.js"
 import useOnlineStatus from "../hooks/useOnlineStatus.js"
 
 /**
@@ -188,6 +188,16 @@ export default function ProfileScreen({
     let isMounted = true
     if (user) {
       setProfileUser(user)
+    } else if (isDoctor) {
+      const docUser = getDoctorAuthUser()
+      if (docUser) {
+        setProfileUser(docUser)
+      } else {
+        const stored = getAuthUser()
+        if (stored && !stored.worker_id && stored.role !== "asha") {
+          setProfileUser(stored)
+        }
+      }
     } else {
       const stored = getAuthUser()
       if (stored) {
@@ -218,9 +228,9 @@ export default function ProfileScreen({
   let displayName = ""
   if (isDoctor) {
     const rawName = profileUser.full_name || profileUser.name
-    displayName = (rawName === "Shreya" || !rawName || rawName === "Dr. Arvind" || rawName === "Dr. Arvind Varma")
-      ? "Dr Arvind Verma"
-      : rawName
+    displayName = (rawName && rawName !== "Shreya" && rawName !== "Pooja Sharma" && !rawName.includes("ASHA"))
+      ? (rawName === "Dr. Arvind" || rawName === "Dr Arvind Verma" || rawName === "Dr. Arvind Varma" ? "Dr Arvind Varma" : rawName)
+      : "Dr Arvind Varma"
   } else if (isAsha) {
     displayName = profileUser.full_name || profileUser.name || "Pooja Sharma"
   } else {

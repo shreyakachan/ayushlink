@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 import {
   endConsultationCall,
+  getDoctorAuthUser,
+  getDoctorAuthToken,
   getAuthUser,
   getAuthToken,
   API_BASE_URL,
@@ -12,7 +14,7 @@ export default function DoctorVideoCallModal({
   onClose,
   onProceedToConsultation,
 }) {
-  const doctor = getAuthUser()
+  const doctor = getDoctorAuthUser() || getAuthUser()
   const patientName = consultation?.patient_name || "Patient"
   const patientId = consultation?.patient_id || "P-4559"
   const sessionId = consultation?.call_session?.room_id || consultation?.consultation_id || "room_default"
@@ -44,7 +46,7 @@ export default function DoctorVideoCallModal({
 
     async function initDoctorVideoSession() {
       try {
-        const token = getAuthToken()
+        const token = getDoctorAuthToken() || getAuthToken()
         const webrtc = new WebRTCManager({
           onLocalStream: (stream) => {
             if (localVideoRef.current && isMounted) {

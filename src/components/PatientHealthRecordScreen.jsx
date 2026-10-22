@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { patientT } from "../lib/patientI18n.js"
 import PatientListenButton from "./PatientListenButton.jsx"
-import { getPatientMedicalRecord } from "../lib/api.js"
+import { getPatientMedicalRecord, getPatientAuthUser } from "../lib/api.js"
 
 /**
  * AyushLink — Patient "My Health Record" screen
@@ -17,28 +17,125 @@ const DEFAULT_RECORD = {
   pastVisits: [],
 }
 
+function formatHealthRecord(raw) {
+  if (!raw) return null
+  const conditions = [
+    ...(Array.isArray(raw.chronicConditions)
+      ? raw.chronicConditions
+      : Array.isArray(raw.chronic_conditions)
+      ? raw.chronic_conditions
+      : []),
+    ...(raw.condition &&
+    !(raw.chronic_conditions || raw.chronicConditions)?.includes(raw.condition)
+      ? [raw.condition]
+      : []),
+  ].filter(Boolean)
+
+  return {
+    bloodGroup: raw.bloodGroup || raw.blood_group || null,
+    allergies: Array.isArray(raw.allergies) ? raw.allergies : [],
+    chronicConditions: conditions,
+    pastVisits: Array.isArray(raw.pastVisits)
+      ? raw.pastVisits
+      : Array.isArray(raw.medical_history)
+      ? raw.medical_history
+      : [],
+  }
+}
+
+function getInitialRecord(initialRecord) {
+  const fromProps = formatHealthRecord(initialRecord)
+  if (
+    fromProps &&
+    (fromProps.bloodGroup ||
+      fromProps.allergies.length > 0 ||
+      fromProps.chronicConditions.length > 0 ||
+      fromProps.pastVisits.length > 0)
+  ) {
+    return fromProps
+  }
+  try {
+    const cached = localStorage.getItem("ayushlink_patient_medical_record")
+    if (cached) {
+      const parsed = JSON.parse(cached)
+      const formatted = formatHealthRecord(parsed)
+      if (
+        formatted &&
+        (formatted.bloodGroup ||
+          formatted.allergies.length > 0 ||
+          formatted.chronicConditions.length > 0 ||
+          formatted.pastVisits.length > 0)
+      ) {
+        return formatted
+      }
+    }
+    const authUser = getPatientAuthUser()
+    if (authUser) {
+      const formatted = formatHealthRecord(authUser)
+      if (
+        formatted &&
+        (formatted.bloodGroup ||
+          formatted.allergies.length > 0 ||
+          formatted.chronicConditions.length > 0 ||
+          formatted.pastVisits.length > 0)
+      ) {
+        return formatted
+      }
+    }
+  } catch {}
+  return fromProps || DEFAULT_RECORD
+}
+
 export default function PatientHealthRecordScreen({ record: initialRecord, lang = "en", onBack }) {
-  const [record, setRecord] = useState(initialRecord || DEFAULT_RECORD)
+  const initialData = getInitialRecord(initialRecord)
+  const [record, setRecord] = useState(initialData)
+  const initialHasData = Boolean(
+    initialData.bloodGroup ||
+      initialData.allergies.length > 0 ||
+      initialData.chronicConditions.length > 0 ||
+      initialData.pastVisits.length > 0
+  )
+  const [loading, setLoading] = useState(!initialHasData)
+  const [hasLoaded, setHasLoaded] = useState(initialHasData)
   const t = patientT(lang)
 
   useEffect(() => {
+    let isMounted = true
+
     async function loadRecord() {
       if (typeof navigator !== "undefined" && !navigator.onLine) {
+        if (isMounted) {
+          setLoading(false)
+          setHasLoaded(true)
+        }
         return
       }
       try {
+        setLoading(true)
         const data = await getPatientMedicalRecord()
+        if (!isMounted) return
         if (data) {
-          setRecord({
-            bloodGroup: data.blood_group || null,
-            allergies: data.allergies || [],
-            chronicConditions: data.chronic_conditions || [],
-            pastVisits: data.medical_history || [],
-          })
+          const formatted = formatHealthRecord(data)
+          setRecord(formatted)
+          setHasLoaded(true)
+          try {
+            localStorage.setItem("ayushlink_patient_medical_record", JSON.stringify(formatted))
+          } catch {}
         }
-      } catch {}
+      } catch (err) {
+        console.warn("[PatientHealthRecordScreen] Failed to load medical record:", err)
+      } finally {
+        if (isMounted) {
+          setLoading(false)
+          setHasLoaded(true)
+        }
+      }
     }
     loadRecord()
+
+    return () => {
+      isMounted = false
+    }
   }, [])
 
   const spokenSummary = [
@@ -48,7 +145,7 @@ export default function PatientHealthRecordScreen({ record: initialRecord, lang 
     `${t.chronicConditions}: ${record.chronicConditions?.length ? record.chronicConditions.join(", ") : t.none2}.`,
     `${t.pastVisits}: ${
       record.pastVisits?.length
-        ? record.pastVisits.map((v) => `${v.reason}, ${v.date}`).join(". ")
+        ? record.pastVisits.map((v) => `${v.reason || v.diagnosis || "Visit"}, ${v.date}`).join(". ")
         : t.none2
     }.`,
   ].join(" ")
@@ -78,7 +175,9 @@ export default function PatientHealthRecordScreen({ record: initialRecord, lang 
               <DropIcon className="h-6 w-6" />
             </span>
             <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{t.bloodGroup}</p>
-            <p className="mt-0.5 text-xl font-bold text-slate-800">{record.bloodGroup || "—"}</p>
+            <p className="mt-0.5 text-xl font-bold text-slate-800">
+              {loading && !record.bloodGroup ? "…" : record.bloodGroup || "—"}
+            </p>
           </div>
           <div className="rounded-3xl border border-slate-100 bg-white p-5 text-center shadow-sm">
             <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
@@ -86,7 +185,13 @@ export default function PatientHealthRecordScreen({ record: initialRecord, lang 
             </span>
             <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{t.allergies}</p>
             <p className="mt-0.5 text-base font-semibold text-slate-800">
-              {record.allergies?.length ? record.allergies.join(", ") : t.none2}
+              {loading && !record.allergies?.length
+                ? "…"
+                : record.allergies?.length
+                ? record.allergies.join(", ")
+                : hasLoaded
+                ? t.none2
+                : "…"}
             </p>
           </div>
         </section>
@@ -95,7 +200,13 @@ export default function PatientHealthRecordScreen({ record: initialRecord, lang 
         <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
           <h2 className="text-base font-bold text-slate-800">{t.chronicConditions}</h2>
           <p className="mt-1.5 text-sm text-slate-600">
-            {record.chronicConditions?.length ? record.chronicConditions.join(", ") : t.none2}
+            {loading && !record.chronicConditions?.length
+              ? "…"
+              : record.chronicConditions?.length
+              ? record.chronicConditions.join(", ")
+              : hasLoaded
+              ? t.none2
+              : "…"}
           </p>
         </section>
 
@@ -104,20 +215,22 @@ export default function PatientHealthRecordScreen({ record: initialRecord, lang 
           <h2 className="text-base font-bold text-slate-800">{t.pastVisits}</h2>
           {record.pastVisits?.length ? (
             <ul className="mt-3 flex flex-col gap-3">
-              {record.pastVisits.map((v) => (
-                <li key={v.id} className="flex items-center gap-3 rounded-2xl bg-slate-50 p-4">
+              {record.pastVisits.map((v, idx) => (
+                <li key={v.id || idx} className="flex items-center gap-3 rounded-2xl bg-slate-50 p-4">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
                     <CalendarIcon className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">{v.reason}</p>
+                    <p className="text-sm font-semibold text-slate-800">{v.reason || v.diagnosis || "Medical Consultation"}</p>
                     <p className="text-xs text-slate-500">{v.date}</p>
                   </div>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="mt-1.5 text-sm text-slate-600">{t.none2}</p>
+            <p className="mt-1.5 text-sm text-slate-600">
+              {loading ? "…" : hasLoaded ? t.none2 : "…"}
+            </p>
           )}
         </section>
       </div>

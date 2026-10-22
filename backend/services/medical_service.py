@@ -239,7 +239,7 @@ async def submit_patient_symptom(
     patients_collection = get_collection(COLLECTION_PATIENTS)
     if patients_collection is not None:
         summary = ", ".join(data.symptoms) if data.symptoms else data.description[:40]
-        status_val = "critical" if data.severity == "severe" else "review" if data.severity == "moderate" else "stable"
+        status_val = "critical" if data.severity == "severe" else "review"
         await patients_collection.update_one(
             {"_id": patient_doc["_id"]},
             {"$set": {"condition": summary, "status": status_val, "updated_at": now}},

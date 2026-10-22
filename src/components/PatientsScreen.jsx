@@ -109,16 +109,7 @@ function VideoIcon({ className }) {
   )
 }
 
-function SparkIcon({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" />
-      <path d="M19 15l.7 1.9L21.6 17.6 19.7 18.3 19 20.2 18.3 18.3 16.4 17.6 18.3 16.9 19 15z" />
-    </svg>
-  )
-}
-
-export default function PatientsScreen({ lang = "en", onBack, onRegisterNew, onOpenConsultation, onTalkToDoctor, onCheckSymptoms }) {
+export default function PatientsScreen({ lang = "en", onBack, onRegisterNew, onOpenConsultation, onTalkToDoctor }) {
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
@@ -261,7 +252,7 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew, onO
               {isDoctor ? "Consultation Patients" : t.patients.title}
             </h1>
             <p className="text-xs text-slate-500">
-              {patients.length} {isDoctor ? "patients with submitted symptoms" : t.patients.registeredTotal}
+              {patients.length} {isDoctor ? "patients with submitted symptoms" : (t.patients.registeredTotal || t.patients.recordsSaved || "records saved")}
             </p>
           </div>
         </header>
@@ -517,29 +508,6 @@ export default function PatientsScreen({ lang = "en", onBack, onRegisterNew, onO
                   >
                     <VideoIcon className="h-4.5 w-4.5" />
                     <span>Talk to Doctor</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const patientData = {
-                        ...selected,
-                        ...(selectedDetails || {}),
-                        patient_id: selectedDetails?.patient_id || selected.id,
-                        id: selectedDetails?.patient_id || selected.id,
-                        name: selectedDetails?.full_name || selected.name,
-                        full_name: selectedDetails?.full_name || selected.name,
-                        village: selectedDetails?.village || selected.village,
-                        age: selectedDetails?.age || selected.age,
-                        gender: selectedDetails?.gender || selected.gender,
-                        recentSymptoms: selectedDetails?.recent_symptoms || selected.recentSymptoms || [],
-                      }
-                      setSelected(null)
-                      onCheckSymptoms?.(patientData)
-                    }}
-                    className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 py-3 text-sm font-bold text-blue-700 shadow-sm transition hover:bg-blue-100 active:scale-98"
-                  >
-                    <SparkIcon className="h-4.5 w-4.5 text-blue-600" />
-                    <span>AI Symptom Checker</span>
                   </button>
                 </div>
               )}

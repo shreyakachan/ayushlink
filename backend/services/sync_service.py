@@ -403,6 +403,7 @@ async def process_batch_sync(
                         "patient_name": canonical_name,
                         "patient_phone": patient_phone,
                         "village": village,
+                        "caller_role": "patient",
                         "asha_worker_id": asha_worker_id,
                         "asha_worker_name": asha_name,
                         "asha_worker_phone": asha_phone,

@@ -4,7 +4,7 @@
  * patient records, symptom submissions, vitals updates, and consultation requests.
  */
 
-import { syncBatch, getAuthToken } from "./api.js"
+import { syncBatch, getAuthToken, getPatientAuthToken, getAshaAuthToken, sendEmergencySOS } from "./api.js"
 
 const DB_NAME = "ayushlink_offline_v2"
 const DB_VERSION = 1
@@ -62,7 +62,13 @@ export async function saveOfflineItem({ type, payload, client_id, client_created
       tx.onerror = () => reject(tx.error)
     })
     // Notify app of new pending item
-    window.dispatchEvent(new CustomEvent("ayushlink:pending_updated"))
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("ayushlink:pending_updated"))
+    }
+    // If network appears online, trigger auto sync
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      triggerAutoSync().catch(() => {})
+    }
     return record
   } catch (err) {
     console.warn("Failed to persist offline item in IndexedDB:", err)
@@ -129,7 +135,9 @@ export async function deleteOfflineItem(clientId) {
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
-    window.dispatchEvent(new CustomEvent("ayushlink:pending_updated"))
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("ayushlink:pending_updated"))
+    }
   } catch (err) {
     console.warn("Failed to delete offline item in IndexedDB:", err)
   }
@@ -137,9 +145,11 @@ export async function deleteOfflineItem(clientId) {
 
 /**
  * Synchronize all pending items in the offline queue with the backend.
+ * Uses dedicated endpoints where applicable (e.g. POST /api/emergency/sos)
+ * and falls back to batch sync for standard offline records.
  */
 export async function syncPendingQueue() {
-  const token = getAuthToken()
+  const token = getAuthToken() || getPatientAuthToken() || getAshaAuthToken()
   if (!token) return { total_items: 0, synced_count: 0 }
 
   const pending = await getPendingItems()
@@ -147,37 +157,136 @@ export async function syncPendingQueue() {
     return { total_items: 0, synced_count: 0 }
   }
 
-  const batchPayload = {
-    batch_id: `BATCH-${Date.now()}`,
-    items: pending.map((item) => ({
-      client_id: item.client_id,
-      type: item.type,
-      client_created_at: item.client_created_at,
-      payload: item.payload,
-    })),
+  const sosItems = pending.filter((item) => item.type === "emergency_sos")
+  const otherItems = pending.filter((item) => item.type !== "emergency_sos")
+
+  let syncedCount = 0
+  const results = []
+
+  // 1. Process emergency SOS items using the existing backend SOS endpoint (/api/emergency/sos)
+  for (const item of sosItems) {
+    try {
+      const payload = {
+        ...(item.payload || {}),
+        offline_id: item.client_id,
+      }
+      const res = await sendEmergencySOS(payload)
+      if (res && (res.alert_id || res.id)) {
+        await markItemSynced(item.client_id, res)
+        syncedCount++
+        results.push({
+          client_id: item.client_id,
+          type: item.type,
+          status: "synced",
+          server_id: res.alert_id || res.id,
+          message: "Emergency SOS synchronized and dispatched successfully.",
+        })
+      }
+    } catch (err) {
+      console.warn(`[offlineDb] Failed to synchronize emergency SOS ${item.client_id}:`, err)
+      // Do not mark synced; preserve in pending queue for automatic retry
+    }
   }
 
-  try {
-    const syncRes = await syncBatch(batchPayload)
-    if (syncRes && Array.isArray(syncRes.results)) {
-      for (const res of syncRes.results) {
-        if (res.status === "synced" || res.status === "already_synced") {
-          await markItemSynced(res.client_id, res)
+  // 2. Process other records via batch sync endpoint (/api/sync/batch)
+  if (otherItems.length > 0) {
+    const batchPayload = {
+      batch_id: `BATCH-${Date.now()}`,
+      items: otherItems.map((item) => ({
+        client_id: item.client_id,
+        type: item.type,
+        client_created_at: item.client_created_at,
+        payload: item.payload,
+      })),
+    }
+
+    try {
+      const syncRes = await syncBatch(batchPayload)
+      if (syncRes && Array.isArray(syncRes.results)) {
+        for (const res of syncRes.results) {
+          if (res.status === "synced" || res.status === "already_synced") {
+            await markItemSynced(res.client_id, res)
+            syncedCount++
+          }
+          results.push(res)
         }
       }
+    } catch (err) {
+      console.warn("[offlineDb] Background batch sync failed:", err)
+      if (sosItems.length === 0) {
+        throw err
+      }
     }
-    window.dispatchEvent(new CustomEvent("ayushlink:sync_complete", { detail: syncRes }))
+  }
+
+  const combinedRes = {
+    batch_id: `SYNC-${Date.now()}`,
+    total_items: pending.length,
+    synced_count: syncedCount,
+    results,
+  }
+
+  if (syncedCount > 0 && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("ayushlink:sync_complete", { detail: combinedRes }))
     window.dispatchEvent(new CustomEvent("ayushlink:pending_updated"))
-    return syncRes
+  }
+
+  return combinedRes
+}
+
+let syncRetryTimer = null
+let isSyncing = false
+
+/**
+ * Automatically retry synchronization when connectivity returns and the backend becomes reachable.
+ */
+export async function triggerAutoSync() {
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    return
+  }
+  if (isSyncing) return
+  isSyncing = true
+
+  try {
+    const pending = await getPendingItems()
+    if (!pending || pending.length === 0) {
+      if (syncRetryTimer) {
+        clearInterval(syncRetryTimer)
+        syncRetryTimer = null
+      }
+      return
+    }
+
+    await syncPendingQueue()
+
+    const remaining = await getPendingItems()
+    if (remaining.length === 0) {
+      if (syncRetryTimer) {
+        clearInterval(syncRetryTimer)
+        syncRetryTimer = null
+      }
+    } else if (!syncRetryTimer && typeof navigator !== "undefined" && navigator.onLine) {
+      syncRetryTimer = setInterval(() => {
+        triggerAutoSync().catch(() => {})
+      }, 3000)
+    }
   } catch (err) {
-    console.warn("Background sync failed:", err)
-    throw err
+    if (!syncRetryTimer && typeof navigator !== "undefined" && navigator.onLine) {
+      syncRetryTimer = setInterval(() => {
+        triggerAutoSync().catch(() => {})
+      }, 3000)
+    }
+  } finally {
+    isSyncing = false
   }
 }
 
-// Automatically trigger sync when network returns online
+// Automatically trigger sync when network returns online or window gains focus
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => {
-    syncPendingQueue().catch(() => {})
+    triggerAutoSync().catch(() => {})
+  })
+  window.addEventListener("focus", () => {
+    triggerAutoSync().catch(() => {})
   })
 }

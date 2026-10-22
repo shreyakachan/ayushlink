@@ -211,6 +211,87 @@ export function getAshaAuthUser() {
   return null
 }
 
+/**
+ * Retrieve Doctor JWT token strictly separated from patient and ASHA roles.
+ * Guaranteed to never return a patient or ASHA token.
+ */
+export function getDoctorAuthToken() {
+  try {
+    // 1. Dedicated Doctor token storage
+    const docTok = localStorage.getItem("ayushlink_doctor_token")
+    if (docTok) {
+      const check = checkTokenExpiry(docTok)
+      if (!check.expired && check.payload?.role === "doctor") {
+        return docTok
+      }
+    }
+
+    // 2. Active generic token IF it belongs to a Doctor
+    const role = getAuthRole()
+    if (role === "doctor") {
+      const tok = getAuthToken()
+      if (tok) {
+        const check = checkTokenExpiry(tok)
+        if (!check.expired && check.payload?.role === "doctor") {
+          return tok
+        }
+      }
+    }
+
+    // 3. Offline accounts cache
+    const cacheRaw = localStorage.getItem(ACCOUNTS_CACHE_KEY)
+    if (cacheRaw) {
+      const cache = JSON.parse(cacheRaw)
+      const dEntry =
+        cache["doctor_9823088882"] ||
+        cache["doctor_doc-501"] ||
+        Object.values(cache).find(
+          (e) => e.role === "doctor" && e.token && checkTokenExpiry(e.token).payload?.role === "doctor"
+        )
+      if (dEntry?.token) {
+        const check = checkTokenExpiry(dEntry.token)
+        if (!check.expired && check.payload?.role === "doctor") {
+          return dEntry.token
+        }
+      }
+    }
+  } catch {}
+  return null
+}
+
+/**
+ * Retrieve Doctor user profile strictly separated from patient and ASHA roles.
+ * Guaranteed to never return a patient or ASHA identity.
+ */
+export function getDoctorAuthUser() {
+  try {
+    const role = getAuthRole()
+    if (role === "doctor") {
+      const u = getAuthUser()
+      if (u && (u.doctor_id || u.role === "doctor") && !u.worker_id && u.role !== "asha" && u.role !== "patient") {
+        return u
+      }
+    }
+    const raw = localStorage.getItem("ayushlink_doctor_user")
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && (parsed.doctor_id || parsed.role === "doctor") && !parsed.worker_id && parsed.role !== "asha") {
+        return parsed
+      }
+    }
+    const cacheRaw = localStorage.getItem(ACCOUNTS_CACHE_KEY)
+    if (cacheRaw) {
+      const cache = JSON.parse(cacheRaw)
+      const dEntry =
+        cache["doctor_9823088882"] ||
+        cache["doctor_doc-501"] ||
+        Object.values(cache).find((e) => e.role === "doctor" && e.user && !e.user?.worker_id)
+      if (dEntry?.user) return dEntry.user
+    }
+  } catch {}
+  return null
+}
+
 export function setAuthSession(token, user, role) {
   try {
     if (token) localStorage.setItem(TOKEN_KEY, token)
@@ -595,7 +676,9 @@ export async function loginDoctor(phone, password) {
 }
 
 export async function getDoctorProfile() {
-  return await apiFetch("/doctor/profile")
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
+  return await apiFetch("/doctor/profile", { headers })
 }
 
 export async function registerDoctor(doctorData) {
@@ -628,30 +711,57 @@ export async function registerDoctor(doctorData) {
    ========================================================================= */
 
 export async function getPatientsList() {
-  return await apiFetch("/patients")
+  const role = getAuthRole()
+  if (role === "patient") {
+    const patientToken = getPatientAuthToken() || getAuthToken()
+    const headers = patientToken ? { Authorization: `Bearer ${patientToken}` } : {}
+    return await apiFetch("/patients", { headers })
+  }
+  if (role === "doctor") {
+    return await apiFetch("/patients")
+  }
+  const ashaToken = getAshaAuthToken() || getAuthToken()
+  const headers = ashaToken ? { Authorization: `Bearer ${ashaToken}` } : {}
+  return await apiFetch("/patients", { headers })
 }
 
 export async function getPatientMedicalRecord(patientId = null) {
   const role = getAuthRole()
   if (role === "asha" && patientId) {
-    return await apiFetch(`/asha/patients/${patientId}/records`)
+    const ashaToken = getAshaAuthToken() || getAuthToken()
+    const headers = ashaToken ? { Authorization: `Bearer ${ashaToken}` } : {}
+    return await apiFetch(`/asha/patients/${patientId}/records`, { headers })
   }
   if (role === "doctor" && patientId) {
     return await apiFetch(`/doctor/patients/${patientId}/records`)
   }
-  return await apiFetch("/patient/medical-record")
+  const patientToken = getPatientAuthToken() || getAuthToken()
+  const headers = {}
+  if (patientToken) {
+    headers["Authorization"] = `Bearer ${patientToken}`
+  }
+  return await apiFetch("/patient/medical-record", { headers })
 }
 
 export async function updatePatientMedicalRecord(updateData, patientId = null) {
   const role = getAuthRole()
   if (role === "asha" && patientId) {
+    const ashaToken = getAshaAuthToken() || getAuthToken()
+    const headers = ashaToken ? { Authorization: `Bearer ${ashaToken}` } : {}
     return await apiFetch(`/asha/patients/${patientId}/records`, {
       method: "PUT",
+      headers,
       body: updateData,
     })
   }
+  const patientToken = getPatientAuthToken() || getAuthToken()
+  const headers = {}
+  if (patientToken) {
+    headers["Authorization"] = `Bearer ${patientToken}`
+  }
   return await apiFetch("/patient/medical-record", {
     method: "PUT",
+    headers,
     body: updateData,
   })
 }
@@ -659,13 +769,19 @@ export async function updatePatientMedicalRecord(updateData, patientId = null) {
 export async function submitPatientSymptoms(symptomData, patientId = null) {
   const role = getAuthRole()
   if (role === "asha" && patientId) {
+    const ashaToken = getAshaAuthToken() || getAuthToken()
+    const headers = ashaToken ? { Authorization: `Bearer ${ashaToken}` } : {}
     return await apiFetch(`/asha/patients/${patientId}/symptoms`, {
       method: "POST",
+      headers,
       body: symptomData,
     })
   }
+  const patientToken = getPatientAuthToken() || getAuthToken()
+  const headers = patientToken ? { Authorization: `Bearer ${patientToken}` } : {}
   return await apiFetch("/patient/symptoms", {
     method: "POST",
+    headers,
     body: symptomData,
   })
 }
@@ -699,7 +815,9 @@ export async function getPatientSymptoms(patientId = null) {
 }
 
 export async function getAshaCases() {
-  return await apiFetch("/asha/cases")
+  const ashaToken = getAshaAuthToken() || getAuthToken()
+  const headers = ashaToken ? { Authorization: `Bearer ${ashaToken}` } : {}
+  return await apiFetch("/asha/cases", { headers })
 }
 
 export async function assignPatientToAsha(patientId, workerId = null) {
@@ -720,19 +838,36 @@ export async function assignPatientToAsha(patientId, workerId = null) {
    ========================================================================= */
 
 export async function getAshaInventory() {
-  return await apiFetch("/asha/inventory")
+  const ashaToken = getAshaAuthToken() || getAuthToken()
+  const headers = {}
+  if (ashaToken) {
+    headers["Authorization"] = `Bearer ${ashaToken}`
+  }
+  return await apiFetch("/asha/inventory", { headers })
 }
 
 export async function adjustAshaInventoryStock(itemId, delta) {
+  const ashaToken = getAshaAuthToken() || getAuthToken()
+  const headers = {}
+  if (ashaToken) {
+    headers["Authorization"] = `Bearer ${ashaToken}`
+  }
   return await apiFetch(`/asha/inventory/${itemId}/adjust`, {
     method: "POST",
+    headers,
     body: { delta: Number(delta) },
   })
 }
 
 export async function updateAshaInventoryItem(itemId, updateData) {
+  const ashaToken = getAshaAuthToken() || getAuthToken()
+  const headers = {}
+  if (ashaToken) {
+    headers["Authorization"] = `Bearer ${ashaToken}`
+  }
   return await apiFetch(`/asha/inventory/${itemId}`, {
     method: "PATCH",
+    headers,
     body: updateData,
   })
 }
@@ -742,18 +877,28 @@ export async function updateAshaInventoryItem(itemId, updateData) {
    ========================================================================= */
 
 export async function getDoctorCases() {
-  return await apiFetch("/doctor/cases")
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
+  return await apiFetch("/doctor/cases", { headers })
 }
 
 export async function getDoctorPatients() {
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
   try {
-    return await apiFetch("/doctor/patients")
+    return await apiFetch("/doctor/patients", { headers })
   } catch {
-    return await apiFetch("/doctor/cases")
+    return await apiFetch("/doctor/cases", { headers })
   }
 }
 
 export async function getMchCases() {
+  const role = getAuthRole()
+  if (role === "asha") {
+    const ashaToken = getAshaAuthToken() || getAuthToken()
+    const headers = ashaToken ? { Authorization: `Bearer ${ashaToken}` } : {}
+    return await apiFetch("/doctor/mch-cases", { headers })
+  }
   return await apiFetch("/doctor/mch-cases")
 }
 
@@ -782,7 +927,9 @@ export async function getAshaWorkersList() {
 export async function getPatientPrescriptions(patientId = null) {
   const role = getAuthRole()
   if (role === "asha" && patientId) {
-    return await apiFetch(`/asha/patients/${patientId}/prescriptions`)
+    const ashaToken = getAshaAuthToken() || getAuthToken()
+    const headers = ashaToken ? { Authorization: `Bearer ${ashaToken}` } : {}
+    return await apiFetch(`/asha/patients/${patientId}/prescriptions`, { headers })
   }
   if (role === "doctor" && patientId) {
     return await apiFetch(`/doctor/patients/${patientId}/prescriptions`)
@@ -790,7 +937,9 @@ export async function getPatientPrescriptions(patientId = null) {
   if (role === "doctor") {
     return await apiFetch("/doctor/prescriptions")
   }
-  return await apiFetch("/patient/prescriptions")
+  const patientToken = getPatientAuthToken() || getAuthToken()
+  const headers = patientToken ? { Authorization: `Bearer ${patientToken}` } : {}
+  return await apiFetch("/patient/prescriptions", { headers })
 }
 
 export async function createDoctorPrescription(prescriptionData) {
@@ -841,9 +990,12 @@ export async function getPatientConsultations(patientId) {
 }
 
 export async function decideConsultation(consultationId, action, notes = null) {
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
   return await apiFetch(`/consultations/${consultationId}/decision`, {
     method: "POST",
     body: { action, notes },
+    headers,
   })
 }
 
@@ -872,7 +1024,19 @@ export async function updateConsultationStatus(consultationId, status, notes = n
 }
 
 export async function getConsultationHistory() {
-  return await apiFetch("/consultations/history")
+  const role = getAuthRole()
+  let token = null
+  if (role === "doctor") {
+    token = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  } else if (role === "asha") {
+    token = getAshaAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "asha" ? getAuthToken() : null)
+  } else if (role === "patient") {
+    token = getPatientAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "patient" ? getAuthToken() : null)
+  } else {
+    token = getAuthToken()
+  }
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+  return await apiFetch("/consultations/history", { headers })
 }
 
 export async function getPatientActiveVideoRequest() {
@@ -891,12 +1055,27 @@ export async function getPatientActiveVideoRequest() {
 }
 
 export async function getDoctorVideoRequests() {
-  return await apiFetch("/doctor/video-requests")
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
+  return await apiFetch("/doctor/video-requests", { headers })
 }
 
 export async function endConsultationCall(consultationId) {
+  const role = getAuthRole()
+  let token = null
+  if (role === "doctor") {
+    token = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  } else if (role === "patient") {
+    token = getPatientAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "patient" ? getAuthToken() : null)
+  } else if (role === "asha") {
+    token = getAshaAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "asha" ? getAuthToken() : null)
+  } else {
+    token = getAuthToken()
+  }
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
   return await apiFetch(`/consultations/${consultationId}/end-call`, {
     method: "POST",
+    headers,
   })
 }
 
@@ -944,7 +1123,9 @@ export async function checkSyncStatus() {
    ========================================================================= */
 
 export async function getDoctorNotifications() {
-  return await apiFetch("/doctor/notifications")
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
+  return await apiFetch("/doctor/notifications", { headers })
 }
 
 export async function getAshaNotifications() {
@@ -1040,9 +1221,9 @@ export async function sendEmergencySOS(emergencyData = {}) {
   }
 
   const headers = { ...(emergencyData.headers || {}) }
-  const patientToken = getPatientAuthToken()
-  if (!headers["Authorization"] && patientToken && getAuthRole() !== "patient") {
-    headers["Authorization"] = `Bearer ${patientToken}`
+  const token = emergencyData.token || getPatientAuthToken() || getAuthToken()
+  if (!headers["Authorization"] && token) {
+    headers["Authorization"] = `Bearer ${token}`
   }
 
   return await apiFetch("/emergency/sos", {

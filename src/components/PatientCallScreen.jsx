@@ -46,7 +46,7 @@ export default function PatientCallScreen({ patient, lang = "en", onBack }) {
 
   // Doctor selection & request fields
   const [doctorsList, setDoctorsList] = useState([])
-  const [selectedDoctorId, setSelectedDoctorId] = useState("DOC-101")
+  const [selectedDoctorId, setSelectedDoctorId] = useState("DOC-501")
   const [reason, setReason] = useState("Medical consultation & symptom evaluation")
   const [urgency, setUrgency] = useState("routine")
   const [requesting, setRequesting] = useState(false)
@@ -100,7 +100,8 @@ export default function PatientCallScreen({ patient, lang = "en", onBack }) {
 
         if (docsRes.status === "fulfilled" && Array.isArray(docsRes.value) && docsRes.value.length > 0) {
           setDoctorsList(docsRes.value)
-          setSelectedDoctorId(docsRes.value[0].doctor_id || "DOC-101")
+          const hasDoc501 = docsRes.value.some((d) => d.doctor_id === "DOC-501")
+          setSelectedDoctorId(hasDoc501 ? "DOC-501" : docsRes.value[0].doctor_id || "DOC-501")
         }
 
         if (activeReq.status === "fulfilled" && activeReq.value) {
@@ -438,7 +439,10 @@ export default function PatientCallScreen({ patient, lang = "en", onBack }) {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
-  const doctorDisplayName = activeConsultation?.doctor_name || doctorsList.find((d) => d.doctor_id === selectedDoctorId)?.full_name || "Dr Arvind Verma"
+  const rawDocName = activeConsultation?.doctor_name || doctorsList.find((d) => d.doctor_id === selectedDoctorId)?.full_name || "Dr Arvind Varma"
+  const doctorDisplayName = (rawDocName === "Dr Arvind Verma" || rawDocName === "Dr. Arvind" || rawDocName === "Dr. Arvind Varma" || rawDocName === "Shreya" || rawDocName === "Pooja Sharma")
+    ? "Dr Arvind Varma"
+    : rawDocName
 
   return (
     <div className="flex min-h-dvh w-full flex-col bg-slate-900 text-white select-none">
@@ -500,12 +504,15 @@ export default function PatientCallScreen({ patient, lang = "en", onBack }) {
                 {(doctorsList.length > 0
                   ? doctorsList
                   : [
-                      { doctor_id: "DOC-101", full_name: "Dr Arvind Verma", specialization: "General Physician & AYUSH Consultant" },
-                      { doctor_id: "DOC-501", full_name: "Dr Arvind Verma", specialization: "General Medicine" },
+                      { doctor_id: "DOC-501", full_name: "Dr Arvind Varma", specialization: "General Medicine" },
+                      { doctor_id: "DOC-101", full_name: "Dr Arvind Varma", specialization: "General Physician & AYUSH Consultant" },
                       { doctor_id: "DOC-102", full_name: "Dr. Anjali Rao", specialization: "Pediatrics & Child Health" },
                     ]
                 ).map((doc) => {
                   const isSelected = selectedDoctorId === doc.doctor_id
+                  const resolvedDocName = (doc.doctor_id === "DOC-501" || doc.full_name === "Dr Arvind Verma" || doc.full_name === "Dr. Arvind" || doc.full_name === "Dr. Arvind Varma")
+                    ? "Dr Arvind Varma"
+                    : doc.full_name
                   return (
                     <button
                       key={doc.doctor_id}
@@ -519,10 +526,10 @@ export default function PatientCallScreen({ patient, lang = "en", onBack }) {
                     >
                       <div className="flex items-center gap-3">
                         <span className={`flex h-11 w-11 items-center justify-center rounded-xl font-bold text-sm ${isSelected ? "bg-blue-600 text-white" : "bg-slate-700 text-slate-300"}`}>
-                          {doc.full_name.replace(/^Dr\.?\s*/i, "").charAt(0)}
+                          {resolvedDocName.replace(/^Dr\.?\s*/i, "").charAt(0)}
                         </span>
                         <div>
-                          <p className="font-bold text-sm text-white">{doc.full_name}</p>
+                          <p className="font-bold text-sm text-white">{resolvedDocName}</p>
                           <p className="text-xs text-slate-400">{doc.specialization || "AYUSH Consultant"}</p>
                         </div>
                       </div>

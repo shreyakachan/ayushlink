@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react"
 import {
   getDoctorCases,
   getAshaWorkersList,
-  getAuthUser,
+  getDoctorAuthUser,
   assignDoctorCase,
   getPatientMedicalRecord,
   getDoctorVideoRequests,
@@ -57,6 +57,37 @@ function formatPatientName(name) {
     .join(" ")
 }
 
+function mapCasesToQueue(casesList) {
+  if (!Array.isArray(casesList)) return []
+  return casesList.map((c, idx) => {
+    let rawStatus = (c.status || "pending").toLowerCase()
+    // Ensure newly reported symptoms are reviewable and not misclassified as stable/completed
+    if (rawStatus === "stable" && c.recent_symptoms?.length && c.recent_symptoms[0]?.status === "reported") {
+      rawStatus = "review"
+    }
+    const rawUrgency = (c.urgency || (rawStatus === "urgent" || rawStatus === "critical" ? "urgent" : "normal")).toLowerCase()
+    const latestSymptom = c.recent_symptoms?.[0]
+    const currentReason = latestSymptom
+      ? (latestSymptom.symptoms?.length ? latestSymptom.symptoms.join(", ") : latestSymptom.description)
+      : (c.condition || "Consultation Request")
+    return {
+      id: c.patient_id || `P-${4550 + idx}`,
+      name: formatPatientName(c.full_name || "Patient"),
+      village: c.village || "Chandapur",
+      age: c.age || 28,
+      gender: c.gender ? c.gender.charAt(0).toUpperCase() + c.gender.slice(1) : "Female",
+      symptoms: c.recent_symptoms || [],
+      reason: currentReason,
+      waiting: c.waiting_time || `${Math.max(2, (idx + 1) * 4)} min ago`,
+      status: rawStatus === "critical" || rawStatus === "urgent" ? "urgent" : rawStatus,
+      urgency: rawUrgency,
+      bloodGroup: c.blood_group || "—",
+      phone: c.phone || "—",
+      ashaWorkerId: c.asha_worker_id,
+    }
+  })
+}
+
 export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation }) {
   const [activeNav, setActiveNav] = useState("dashboard")
   const [queue, setQueue] = useState([])
@@ -73,17 +104,18 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(true)
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   const [doctorProfile, setDoctorProfile] = useState(() => {
-    const auth = getAuthUser()
+    const auth = getDoctorAuthUser()
     const rawName = auth?.full_name || auth?.name
-    const resolvedName = (rawName === "Shreya" || !rawName || rawName === "Dr. Arvind" || rawName === "Dr. Arvind Varma")
-      ? "Dr Arvind Verma"
-      : rawName
+    const resolvedName = (rawName && rawName !== "Shreya" && rawName !== "Pooja Sharma" && !rawName.includes("ASHA"))
+      ? (rawName === "Dr. Arvind" || rawName === "Dr Arvind Verma" || rawName === "Dr. Arvind Varma" ? "Dr Arvind Varma" : rawName)
+      : "Dr Arvind Varma"
     return {
       name: resolvedName,
       qualification: auth?.qualification || (auth?.specialization ? `${auth.specialization}` : "MBBS, MD"),
-      specialization: auth?.specialization || "General Physician & AYUSH Consultant",
+      specialization: auth?.specialization || "General Medicine",
       facility: auth?.assigned_facility || "Chandapur PHC",
       isOnDuty: auth?.is_on_duty !== undefined ? auth.is_on_duty : true,
     }
@@ -94,15 +126,15 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
     async function loadDashboardData() {
       try {
         setLoading(true)
-        const authUser = getAuthUser()
+        const authUser = getDoctorAuthUser()
         const rawName = authUser?.full_name || authUser?.name
-        const resolvedName = (rawName === "Shreya" || !rawName || rawName === "Dr. Arvind" || rawName === "Dr. Arvind Varma")
-          ? "Dr Arvind Verma"
-          : rawName
+        const resolvedName = (rawName && rawName !== "Shreya" && rawName !== "Pooja Sharma" && !rawName.includes("ASHA"))
+          ? (rawName === "Dr. Arvind" || rawName === "Dr Arvind Verma" || rawName === "Dr. Arvind Varma" ? "Dr Arvind Varma" : rawName)
+          : "Dr Arvind Varma"
         setDoctorProfile({
           name: resolvedName,
           qualification: authUser?.qualification || (authUser?.specialization ? `${authUser.specialization}` : "MBBS, MD"),
-          specialization: authUser?.specialization || "General Physician & AYUSH Consultant",
+          specialization: authUser?.specialization || "General Medicine",
           facility: authUser?.assigned_facility || "Chandapur PHC",
           isOnDuty: authUser?.is_on_duty !== undefined ? authUser.is_on_duty : true,
         })
@@ -118,30 +150,7 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
         if (!isMounted) return
 
         if (cases.status === "fulfilled" && Array.isArray(cases.value)) {
-          const liveQueue = cases.value.map((c, idx) => {
-            const rawStatus = (c.status || "pending").toLowerCase()
-            const rawUrgency = (c.urgency || (rawStatus === "urgent" || rawStatus === "critical" ? "urgent" : "normal")).toLowerCase()
-            const latestSymptom = c.recent_symptoms?.[0]
-            const currentReason = latestSymptom
-              ? (latestSymptom.symptoms?.length ? latestSymptom.symptoms.join(", ") : latestSymptom.description)
-              : (c.condition || "Consultation Request")
-            return {
-              id: c.patient_id || `P-${4550 + idx}`,
-              name: formatPatientName(c.full_name || "Patient"),
-              village: c.village || "Chandapur",
-              age: c.age || 28,
-              gender: c.gender ? c.gender.charAt(0).toUpperCase() + c.gender.slice(1) : "Female",
-              symptoms: c.recent_symptoms || [],
-              reason: currentReason,
-              waiting: c.waiting_time || `${Math.max(2, (idx + 1) * 4)} min ago`,
-              status: rawStatus === "critical" || rawStatus === "urgent" ? "urgent" : rawStatus,
-              urgency: rawUrgency,
-              bloodGroup: c.blood_group || "—",
-              phone: c.phone || "—",
-              ashaWorkerId: c.asha_worker_id,
-            }
-          })
-          setQueue(liveQueue)
+          setQueue(mapCasesToQueue(cases.value))
         }
 
         if (ashas.status === "fulfilled" && Array.isArray(ashas.value)) {
@@ -167,10 +176,14 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
 
     const pollDoctorData = async () => {
       try {
-        const [vReqs, notifs] = await Promise.all([
+        const [casesRes, vReqs, notifs] = await Promise.all([
+          getDoctorCases().catch(() => null),
           getDoctorVideoRequests().catch(() => null),
           getDoctorNotifications().catch(() => null),
         ])
+        if (isMounted && Array.isArray(casesRes)) {
+          setQueue(mapCasesToQueue(casesRes))
+        }
         if (isMounted && Array.isArray(vReqs)) {
           setVideoRequests(vReqs.filter((r) => r.status === "requested" || r.status === "accepted"))
         }
@@ -195,6 +208,20 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
       window.removeEventListener("ayushlink:sync_complete", pollDoctorData)
     }
   }, [])
+
+  const refreshQueue = async () => {
+    setIsRefreshing(true)
+    try {
+      const casesRes = await getDoctorCases()
+      if (Array.isArray(casesRes)) {
+        setQueue(mapCasesToQueue(casesRes))
+      }
+    } catch (err) {
+      console.error("Doctor queue refresh error:", err)
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
 
   // Calculate actual statistics from live queue
   const stats = useMemo(() => {
@@ -664,6 +691,15 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    onClick={refreshQueue}
+                    title="Refresh symptom queue"
+                    className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-600 shadow-sm transition active:scale-95"
+                  >
+                    <SyncIcon className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin text-blue-600" : ""}`} />
+                    <span>Refresh</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onSelect?.("patients")}
                     className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
                   >
@@ -923,12 +959,46 @@ export default function DoctorHomeScreen({ onSelect, onBack, onStartConsultation
             <div className="mt-4 flex flex-col gap-4">
               {/* Reason / Chief Complaint */}
               <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-blue-700">Chief Complaint & Symptoms</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-blue-700">Chief Complaint & Latest Symptoms</p>
                 <p className="mt-1 text-sm font-semibold text-slate-800">{selectedPatientModal.reason}</p>
                 {selectedPatientModal.waiting && (
                   <p className="mt-1 text-xs text-slate-500">Requested: {selectedPatientModal.waiting}</p>
                 )}
               </div>
+
+              {/* Submitted Symptoms History */}
+              {((patientRecordDetails?.recent_symptoms && patientRecordDetails.recent_symptoms.length > 0) ||
+                (selectedPatientModal.symptoms && selectedPatientModal.symptoms.length > 0)) && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                    Symptom Submission History ({ (patientRecordDetails?.recent_symptoms || selectedPatientModal.symptoms).length })
+                  </p>
+                  <div className="flex flex-col gap-2 max-h-48 overflow-y-auto divide-y divide-slate-100">
+                    {(patientRecordDetails?.recent_symptoms || selectedPatientModal.symptoms).map((s, idx) => {
+                      const sympText = s.symptoms?.length ? s.symptoms.join(", ") : s.description
+                      const timeStr = s.recorded_at ? new Date(s.recorded_at).toLocaleString() : "Recently"
+                      return (
+                        <div key={s.symptom_id || idx} className="pt-2 first:pt-0 flex items-start justify-between gap-2 text-xs">
+                          <div>
+                            <span className="font-semibold text-slate-800">{sympText}</span>
+                            {s.description && s.description !== sympText && (
+                              <p className="text-slate-500 text-[11px] mt-0.5">{s.description}</p>
+                            )}
+                            <p className="text-slate-400 text-[10px] mt-0.5">{timeStr} • {s.duration || "recent"}</p>
+                          </div>
+                          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                            s.severity === "severe" ? "bg-red-50 text-red-700 border border-red-200" :
+                            s.severity === "moderate" ? "bg-amber-50 text-amber-700 border border-amber-200" :
+                            "bg-blue-50 text-blue-700 border border-blue-200"
+                          }`}>
+                            {s.severity || "mild"}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Patient Vitals & Clinical Info */}
               <div className="grid grid-cols-2 gap-2.5 text-xs">
