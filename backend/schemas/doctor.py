@@ -104,3 +104,7 @@ class DoctorMchCaseResponse(BaseModel):
     severity: str = "moderate"
     is_high_risk: bool = False
     risk_reason: Optional[str] = None
+    symptom_id: Optional[str] = None
+    due_date: Optional[datetime] = None
+    due_status: Optional[str] = None  # missed | due-soon | upcoming
+    is_demo: bool = False

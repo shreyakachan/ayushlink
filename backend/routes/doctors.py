@@ -10,7 +10,7 @@ from schemas.doctor import (
 )
 from schemas.asha_worker import AshaWorkerResponse
 from schemas.medical_record import PatientMedicalRecordResponse
-from services.security import get_current_doctor
+from services.security import get_current_doctor, get_current_doctor_or_asha
 from services.doctor_service import (
     register_doctor,
     login_doctor,
@@ -107,13 +107,13 @@ async def view_doctor_patients(
 @router.get(
     "/doctor/mch-cases",
     response_model=List[DoctorMchCaseResponse],
-    summary="View real maternal and child health submissions (Doctor only)",
-    description="Returns real maternal, pregnancy, and pediatric symptom submissions from MongoDB.",
+    summary="View maternal and child health submissions (Doctor or ASHA Worker)",
+    description="Returns maternal, pregnancy, and pediatric symptom submissions from MongoDB, scoped to the caller's authorized village or region.",
 )
 async def view_doctor_mch_cases(
-    current_doctor: dict = Depends(get_current_doctor),
+    current_user: dict = Depends(get_current_doctor_or_asha),
 ):
-    return await get_doctor_mch_cases(current_doctor)
+    return await get_doctor_mch_cases(current_user)
 
 
 @router.get(
@@ -176,8 +176,8 @@ async def view_patients_alias(current_doctor: dict = Depends(get_current_doctor)
 
 
 @router.get("/doctors/mch-cases", response_model=List[DoctorMchCaseResponse], include_in_schema=False)
-async def view_mch_cases_alias(current_doctor: dict = Depends(get_current_doctor)):
-    return await get_doctor_mch_cases(current_doctor)
+async def view_mch_cases_alias(current_user: dict = Depends(get_current_doctor_or_asha)):
+    return await get_doctor_mch_cases(current_user)
 
 
 @router.get("/doctors/profile", response_model=DoctorResponse, include_in_schema=False)

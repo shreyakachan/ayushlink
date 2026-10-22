@@ -16,6 +16,7 @@ COLLECTION_NOTIFICATIONS = "notifications"
 COLLECTION_SYNC_LOGS = "sync_logs"
 COLLECTION_INVENTORY = "inventory"
 COLLECTION_EMERGENCY_ALERTS = "emergency_alerts"
+COLLECTION_ASHA_CALLS = "asha_calls"
 
 
 class MongoDB:
@@ -65,6 +66,12 @@ async def init_db_indexes():
         await db_instance.db[COLLECTION_EMERGENCY_ALERTS].create_index("patient_id")
         await db_instance.db[COLLECTION_EMERGENCY_ALERTS].create_index([("village", 1), ("status", 1)])
         await db_instance.db[COLLECTION_EMERGENCY_ALERTS].create_index([("created_at", -1)])
+
+        # ASHA audio calls collection indexes
+        await db_instance.db[COLLECTION_ASHA_CALLS].create_index("call_id", unique=True, sparse=True)
+        await db_instance.db[COLLECTION_ASHA_CALLS].create_index([("patient_id", 1), ("status", 1)])
+        await db_instance.db[COLLECTION_ASHA_CALLS].create_index([("asha_worker_id", 1), ("status", 1)])
+        await db_instance.db[COLLECTION_ASHA_CALLS].create_index([("created_at", -1)])
         logger.info("MongoDB unique indexes verified successfully.")
     except Exception as e:
         logger.warning(f"Note on MongoDB index verification: {e}")

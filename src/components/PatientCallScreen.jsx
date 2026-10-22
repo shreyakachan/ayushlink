@@ -8,6 +8,8 @@ import {
   endConsultationCall,
   updateConsultationStatus,
   getPatientAuthUser,
+  getPatientAuthToken,
+  getAshaAuthToken,
   getAuthRole,
   getAuthToken,
   API_BASE_URL,
@@ -125,36 +127,64 @@ export default function PatientCallScreen({ patient, lang = "en", onBack }) {
   useEffect(() => {
     if (stage !== "waiting") return
 
-    const intervalId = setInterval(async () => {
+    let isMounted = true
+    let isPolling = false
+
+    const checkDoctorAcceptance = async () => {
+      if (!isMounted || isPolling) return
+      isPolling = true
       try {
         let activeReq = null
         if (isAsha) {
           const history = await getConsultationHistory()
-          if (Array.isArray(history)) {
+          if (isMounted && Array.isArray(history)) {
             activeReq = history.find(
               (c) => (c.consultation_id === activeConsultation?.consultation_id || (targetPatientId && c.patient_id === targetPatientId)) &&
                      ["requested", "accepted", "in_progress", "rejected"].includes(c.status)
-            )
+            ) || null
           }
         } else {
           activeReq = await getPatientActiveVideoRequest()
         }
 
+        if (!isMounted) return
+
         if (activeReq) {
-          setActiveConsultation(activeReq)
-          if (activeReq.status === "accepted" || activeReq.status === "in_progress") {
-            setStage("accepted")
-          } else if (activeReq.status === "rejected") {
-            setRequestError("Doctor is currently occupied or declined the request. Please choose another doctor.")
-            setStage("request")
+          const isTargetConsultation =
+            !activeConsultation?.consultation_id ||
+            activeReq.consultation_id === activeConsultation.consultation_id ||
+            (targetPatientId && activeReq.patient_id === targetPatientId)
+
+          if (isTargetConsultation) {
+            if (activeReq.status === "accepted" || activeReq.status === "in_progress") {
+              setActiveConsultation(activeReq)
+              setStage("accepted")
+            } else if (activeReq.status === "rejected") {
+              setActiveConsultation(activeReq)
+              setRequestError("Doctor is currently occupied or declined the request. Please choose another doctor.")
+              setStage("request")
+            } else if (activeReq.status === "requested") {
+              setActiveConsultation((prev) => (prev ? { ...prev, ...activeReq } : activeReq))
+            }
           }
         }
       } catch (err) {
         console.error("Error polling consultation state:", err)
+      } finally {
+        isPolling = false
       }
-    }, 2500)
+    }
 
-    return () => clearInterval(intervalId)
+    // Immediate check on entering waiting stage
+    checkDoctorAcceptance()
+
+    // Rapid polling interval of 1.2s to detect doctor acceptance promptly without lag
+    const intervalId = setInterval(checkDoctorAcceptance, 1200)
+
+    return () => {
+      isMounted = false
+      clearInterval(intervalId)
+    }
   }, [stage, isAsha, activeConsultation?.consultation_id, targetPatientId])
 
   // 3. Call Duration Timer during active call
@@ -195,7 +225,11 @@ export default function PatientCallScreen({ patient, lang = "en", onBack }) {
         payload.patient_id = targetPatientId
       }
 
-      const res = await requestConsultation(payload)
+      const callerToken = isAsha ? (getAshaAuthToken() || getAuthToken()) : (getPatientAuthToken() || getAuthToken())
+      const res = await requestConsultation(payload, {
+        role: isAsha ? "asha" : "patient",
+        token: callerToken,
+      })
 
       if (res) {
         setActiveConsultation(res)
@@ -217,7 +251,10 @@ export default function PatientCallScreen({ patient, lang = "en", onBack }) {
   const handleCancelRequest = async () => {
     if (activeConsultation?.consultation_id) {
       try {
-        await updateConsultationStatus(activeConsultation.consultation_id, "cancelled")
+        const callerToken = isAsha ? (getAshaAuthToken() || getAuthToken()) : (getPatientAuthToken() || getAuthToken())
+        await updateConsultationStatus(activeConsultation.consultation_id, "cancelled", null, {
+          token: callerToken,
+        })
       } catch {}
     }
     setActiveConsultation(null)
@@ -232,7 +269,7 @@ export default function PatientCallScreen({ patient, lang = "en", onBack }) {
     setConnectionState("connecting")
 
     const sessionId = activeConsultation?.call_session?.room_id || activeConsultation?.consultation_id || "room_default"
-    const token = getAuthToken()
+    const token = isAsha ? (getAshaAuthToken() || getAuthToken()) : (getPatientAuthToken() || getAuthToken())
 
     try {
       // Step A: Request real camera & microphone permissions

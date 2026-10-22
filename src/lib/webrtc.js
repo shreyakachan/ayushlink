@@ -128,11 +128,11 @@ export class WebRTCManager {
   /**
    * Create and set local SDP Offer.
    */
-  async createOffer() {
+  async createOffer(options = {}) {
     if (!this.peerConnection) this.createPeerConnection()
     const offer = await this.peerConnection.createOffer({
       offerToReceiveAudio: true,
-      offerToReceiveVideo: true,
+      offerToReceiveVideo: options.video !== undefined ? Boolean(options.video) : true,
     })
     await this.peerConnection.setLocalDescription(offer)
     return offer

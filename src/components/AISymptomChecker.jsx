@@ -2,11 +2,13 @@ import { useState, useEffect, useRef, useMemo } from "react"
 import useAudioRecorder from "../hooks/useAudioRecorder.js"
 import { saveVoiceNote, listVoiceNotes, deleteVoiceNote } from "../lib/audioStore.js"
 import { ASHA_LANGUAGES, ashaT } from "../lib/ashaI18n.js"
+import { analyzeSymptoms, getPatientsList } from "../lib/api.js"
+import { saveOfflineItem, generateClientId } from "../lib/offlineDb.js"
 
 /**
  * AISymptomChecker - AyushLink
  * React + JavaScript + Tailwind CSS
- * Premium AI diagnosis screen with voice input and risk assessment.
+ * Evidence-based clinical symptom triage and risk assessment with voice notes and patient record integration.
  */
 
 /* ---------------- Icons ---------------- */
@@ -108,6 +110,14 @@ function StethoscopeIcon({ className }) {
     </svg>
   )
 }
+function UserIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  )
+}
 
 /* ---------------- Config ---------------- */
 const ACCENT = {
@@ -167,13 +177,25 @@ function Field({ label, htmlFor, children, hint }) {
   )
 }
 
-export default function AISymptomChecker({ lang = "en", onLangChange, onBack, onEmergency, onReferPHC }) {
+export default function AISymptomChecker({
+  lang = "en",
+  onLangChange,
+  onBack,
+  onEmergency,
+  onReferPHC,
+  patient = null,
+}) {
   const [symptoms, setSymptoms] = useState("")
   const [language, setLanguage] = useState(lang)
   const [duration, setDuration] = useState("")
   const [severity, setSeverity] = useState("mild")
   const [analyzing, setAnalyzing] = useState(false)
   const [result, setResult] = useState(null)
+  const [validationError, setValidationError] = useState(null)
+  const [error, setError] = useState(null)
+  const [patients, setPatients] = useState([])
+  const [selectedPatientId, setSelectedPatientId] = useState(patient?.patient_id || patient?.id || "")
+
   const resultRef = useRef(null)
   const t = ashaT(lang)
 
@@ -182,8 +204,34 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
     setLanguage(lang)
   }, [lang])
 
+  // Fetch real assigned patient list from backend for patient selection
+  useEffect(() => {
+    let isMounted = true
+    async function loadPatients() {
+      try {
+        const list = await getPatientsList()
+        if (isMounted && Array.isArray(list)) {
+          setPatients(list)
+        }
+      } catch (err) {
+        console.warn("Could not fetch patient list for symptom checker:", err)
+      }
+    }
+    loadPatients()
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  // Sync incoming patient prop
+  useEffect(() => {
+    if (patient?.patient_id || patient?.id) {
+      setSelectedPatientId(patient.patient_id || patient.id)
+    }
+  }, [patient])
+
   const durations = [
-    { value: "", label: t.aiSymptom.durations[""] || "Select duration" },
+    { value: "", label: t.aiSymptom.durations[""] || t.aiSymptom.selectDuration || "Select duration" },
     { value: "<1d", label: t.aiSymptom.durations["<1d"] },
     { value: "1-3d", label: t.aiSymptom.durations["1-3d"] },
     { value: "4-7d", label: t.aiSymptom.durations["4-7d"] },
@@ -242,6 +290,7 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
             symptomsSnapshot: symptoms.trim(),
           })
           await refreshVoiceNotes()
+          if (validationError) setValidationError(null)
         } finally {
           setSavingNote(false)
         }
@@ -258,21 +307,102 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
     await refreshVoiceNotes()
   }
 
-  const analyze = () => {
-    if (!symptoms.trim()) return
+  const analyze = async () => {
+    const trimmed = symptoms.trim()
+    if (!trimmed && voiceNotes.length === 0) {
+      setValidationError(t.aiSymptom.validationEmpty || "Please enter patient symptoms or record a voice note before running assessment.")
+      return
+    }
+    setValidationError(null)
+    setError(null)
     setAnalyzing(true)
-    setResult(null)
-    setTimeout(() => {
-      const preset = t.aiSymptom.presets[severity]
+
+    const symptomPayload = {
+      symptoms: trimmed || (voiceNotes.length ? `Voice note submitted (${voiceNotes.length} recording/s)` : "Reported symptoms"),
+      duration: duration || "today",
+      severity: severity || "mild",
+      language: language || "en",
+      patient_id: selectedPatientId || undefined,
+      notes: voiceNotes.length ? `Voice notes recorded: ${voiceNotes.length}` : null,
+    }
+
+    // PATH A: Offline safety triage fallback
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      try {
+        const offlineId = generateClientId("TRIAGE-OFFLINE")
+        await saveOfflineItem({
+          type: "symptom_report",
+          client_id: offlineId,
+          client_created_at: new Date().toISOString(),
+          payload: {
+            ...symptomPayload,
+            offline_id: offlineId,
+          },
+        })
+
+        const riskLevel = t.aiSymptom.riskLevels?.[severity] || (severity === "severe" ? "High Risk" : severity === "moderate" ? "Medium Risk" : "Low Risk")
+        const summary = t.aiSymptom.summaries?.[severity] || "Offline assessment completed."
+        const action = t.aiSymptom.actions?.[severity] || "Monitor patient and consult PHC."
+        const medicines = t.aiSymptom.medicines?.[severity] || ["ORS solution", "Rest and fluids"]
+
+        const foundPat = patients.find((p) => (p.patient_id || p.id) === selectedPatientId)
+        setResult({
+          analysis_id: offlineId,
+          level: riskLevel,
+          severity: severity,
+          accent: severity === "mild" ? "emerald" : severity === "moderate" ? "amber" : "red",
+          confidence: severity === "mild" ? 82 : severity === "moderate" ? 76 : 90,
+          summary,
+          action,
+          medicines,
+          refer: severity !== "mild",
+          emergency: severity === "severe",
+          urgent_care_guidance: severity === "severe" ? t.aiSymptom.emergencyAlertDesc : null,
+          disclaimer: t.aiSymptom.offlineModelNote || "Computed on-device with rule-based safety triage.",
+          patient_id: selectedPatientId || null,
+          patient_name: foundPat?.full_name || foundPat?.name || null,
+          village: foundPat?.village || null,
+          isOffline: true,
+        })
+      } catch (offlineErr) {
+        setError("Failed to perform offline triage: " + (offlineErr.message || "Unknown error"))
+      } finally {
+        setAnalyzing(false)
+      }
+      return
+    }
+
+    // PATH B: Online API call to FastAPI symptom analysis service
+    try {
+      const res = await analyzeSymptoms(symptomPayload)
+      const foundPat = patients.find((p) => (p.patient_id || p.id) === selectedPatientId)
+
       setResult({
-        ...preset,
-        accent: severity === "mild" ? "emerald" : severity === "moderate" ? "amber" : "red",
-        refer: severity !== "mild",
-        emergency: severity === "severe",
-        confidence: severity === "mild" ? 82 : severity === "moderate" ? 74 : 91,
+        analysis_id: res.analysis_id,
+        level: res.level,
+        severity: res.severity,
+        accent: res.accent || (res.severity === "severe" ? "red" : res.severity === "moderate" ? "amber" : "emerald"),
+        confidence: res.confidence || (res.severity === "severe" ? 92 : res.severity === "moderate" ? 84 : 86),
+        summary: res.summary,
+        action: res.action,
+        medicines: Array.isArray(res.medicines) ? res.medicines : [],
+        refer: Boolean(res.refer),
+        emergency: Boolean(res.emergency),
+        urgent_care_guidance: res.urgent_care_guidance || null,
+        disclaimer: res.disclaimer || t.aiSymptom.aiDisclaimer,
+        patient_id: res.patient_id || selectedPatientId || null,
+        patient_name: res.patient_name || foundPat?.full_name || foundPat?.name || null,
+        village: res.village || foundPat?.village || null,
+        engine: res.engine,
+        external_ai_configured: res.external_ai_configured,
       })
+    } catch (apiErr) {
+      console.error("Symptom analysis API call failed:", apiErr)
+      const errMsg = apiErr.message || t.aiSymptom.networkError || "Failed to analyze symptoms. Please check server connection and try again."
+      setError(errMsg)
+    } finally {
       setAnalyzing(false)
-    }, 1600)
+    }
   }
 
   const reset = () => {
@@ -280,9 +410,11 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
     setDuration("")
     setSeverity("mild")
     setResult(null)
+    setError(null)
+    setValidationError(null)
   }
 
-  const accent = result ? ACCENT[result.accent] : ACCENT.emerald
+  const accent = result ? ACCENT[result.accent] || ACCENT.emerald : ACCENT.emerald
 
   return (
     <main className="min-h-dvh w-full bg-gradient-to-b from-blue-50 via-white to-sky-50">
@@ -292,7 +424,7 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
           <button
             type="button"
             onClick={onBack}
-            aria-label={t.common.goBack}
+            aria-label={t.common?.goBack || "Back"}
             className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 active:scale-95"
           >
             <BackIcon className="h-5 w-5" />
@@ -312,6 +444,37 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
           {/* Input card */}
           <section className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
             <div className="flex flex-col gap-5">
+              {/* Patient Selection Dropdown */}
+              <Field
+                label={t.aiSymptom.patientLabel || "Select Patient (Optional / Recommended)"}
+                htmlFor="patient-select"
+                hint={t.aiSymptom.patientHint || "Link this symptom assessment directly to an assigned village patient"}
+              >
+                <div className="relative">
+                  <UserIcon className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                  <select
+                    id="patient-select"
+                    value={selectedPatientId}
+                    onChange={(e) => setSelectedPatientId(e.target.value)}
+                    className="w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-9 text-base text-slate-800 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  >
+                    <option value="">
+                      {t.aiSymptom.patientPlaceholder || "-- Walk-in / General Assessment (No patient selected) --"}
+                    </option>
+                    {patients.map((p) => {
+                      const pid = p.patient_id || p.id
+                      const pname = p.full_name || p.name || `Patient ${pid}`
+                      const pvillage = p.village ? ` · ${p.village}` : ""
+                      return (
+                        <option key={pid} value={pid}>
+                          {pname} ({pid}){pvillage}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+              </Field>
+
               {/* Symptoms + voice */}
               <Field label={t.aiSymptom.symptomsLabel} htmlFor="symptoms" hint={t.aiSymptom.symptomsHint}>
                 <div className="relative">
@@ -319,7 +482,10 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                     id="symptoms"
                     rows={4}
                     value={symptoms}
-                    onChange={(e) => setSymptoms(e.target.value)}
+                    onChange={(e) => {
+                      setSymptoms(e.target.value)
+                      if (validationError) setValidationError(null)
+                    }}
                     placeholder={t.aiSymptom.symptomsPlaceholder}
                     className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-4 pr-14 text-base text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                   />
@@ -327,7 +493,7 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                     type="button"
                     onClick={handleMicClick}
                     disabled={recorder.state === "requesting" || recorder.state === "processing"}
-                    aria-label={recorder.state === "recording" ? t.aiSymptom.stopRecording : t.aiSymptom.recordSymptoms}
+                    aria-label={recorder.state === "recording" ? (t.aiSymptom.stopRecording || "Stop") : (t.aiSymptom.recordSymptoms || "Record")}
                     className={
                       "absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-xl transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 " +
                       (recorder.state === "recording"
@@ -347,24 +513,32 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                 {recorder.state === "recording" ? (
                   <p className="flex items-center gap-2 text-sm font-medium text-red-600">
                     <span className="h-2 w-2 animate-ping rounded-full bg-red-600" />
-                    {t.aiSymptom.recordingIn} {ASHA_LANGUAGES.find((l) => l.code === language)?.native || language}… {formatDuration(recorder.elapsedSeconds)}
+                    {t.aiSymptom.recordingIn || "Recording in"} {ASHA_LANGUAGES.find((l) => l.code === language)?.native || language}… {formatDuration(recorder.elapsedSeconds)}
                   </p>
                 ) : recorder.state === "requesting" ? (
-                  <p className="text-sm font-medium text-slate-500">{t.aiSymptom.openingMic}</p>
+                  <p className="text-sm font-medium text-slate-500">{t.aiSymptom.openingMic || "Opening microphone…"}</p>
                 ) : recorder.state === "processing" || savingNote ? (
-                  <p className="text-sm font-medium text-slate-500">{t.aiSymptom.savingVoiceNote}</p>
+                  <p className="text-sm font-medium text-slate-500">{t.aiSymptom.savingVoiceNote || "Saving voice note…"}</p>
                 ) : recorder.state === "error" ? (
                   <p className="text-sm font-medium text-amber-600">{recorder.error}</p>
                 ) : (
                   <p className="text-xs text-slate-400">
-                    {t.aiSymptom.tapMicHint}
+                    {t.aiSymptom.tapMicHint || "Tap mic to record patient symptoms in their native dialect"}
                   </p>
                 )}
               </Field>
 
+              {/* Inline Validation Feedback */}
+              {validationError && (
+                <div className="flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3.5 text-sm font-medium text-amber-800 animate-in fade-in">
+                  <AlertIcon className="h-5 w-5 flex-shrink-0 text-amber-600" />
+                  <span>{validationError}</span>
+                </div>
+              )}
+
               {/* Language + Duration */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label={t.aiSymptom.languageLabel} htmlFor="language">
+                <Field label={t.aiSymptom.langLabel || t.aiSymptom.languageLabel || "Language / भाषा"} htmlFor="language">
                   <div className="relative">
                     <GlobeIcon className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                     <select
@@ -421,12 +595,29 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                 </div>
               </Field>
 
-              {/* Analyze */}
+              {/* API Error Notification & Retry */}
+              {error && (
+                <div className="flex flex-col gap-2.5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 animate-in fade-in">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <AlertIcon className="h-5 w-5 flex-shrink-0 text-red-600" />
+                    <span>{error}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={analyze}
+                    className="self-start rounded-xl bg-red-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 active:scale-95"
+                  >
+                    {t.aiSymptom.retryBtn || "Retry Analysis"}
+                  </button>
+                </div>
+              )}
+
+              {/* Analyze Button */}
               <button
                 type="button"
                 onClick={analyze}
-                disabled={!symptoms.trim() || analyzing}
-                className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 py-4 text-base font-semibold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-300 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={analyzing}
+                className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 py-4 text-base font-semibold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-300 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {analyzing ? (
                   <>
@@ -436,7 +627,7 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                 ) : (
                   <>
                     <SparkIcon className="h-5 w-5" />
-                    {t.aiSymptom.runAssessment}
+                    {t.aiSymptom.runAnalysis || t.aiSymptom.runAssessment || "Run AI Analysis"}
                   </>
                 )}
               </button>
@@ -451,13 +642,13 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                   <MicIcon className="h-5 w-5" />
                 </span>
                 <div>
-                  <h3 className="text-base font-bold text-slate-800">{t.aiSymptom.voiceNotes}</h3>
-                  <p className="text-xs text-slate-500">{t.aiSymptom.voiceNotesDesc}</p>
+                  <h3 className="text-base font-bold text-slate-800">{t.aiSymptom.voiceNotesLabel || t.aiSymptom.voiceNotes}</h3>
+                  <p className="text-xs text-slate-500">{t.aiSymptom.voiceNotesHint || t.aiSymptom.voiceNotesDesc}</p>
                 </div>
               </div>
 
               {notesLoading ? (
-                <p className="mt-4 text-sm text-slate-400">{t.aiSymptom.loadingRecordings}</p>
+                <p className="mt-4 text-sm text-slate-400">{t.aiSymptom.loadingRecordings || "Loading recordings…"}</p>
               ) : (
                 <ul className="mt-4 flex flex-col gap-3">
                   {voiceNotes.map((note) => (
@@ -468,23 +659,33 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
             </section>
           )}
 
-          {/* Result */}
+          {/* Result Section */}
           {result ? (
             <section ref={resultRef} className="flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
               {/* Risk header card */}
               <div className={"rounded-3xl border p-5 shadow-sm ring-1 " + accent.card + " " + accent.ring}>
+                {/* Associated Patient Badge if selected */}
+                {(result.patient_name || result.patient_id) && (
+                  <div className="mb-3 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/90 px-3 py-1 text-xs font-bold text-slate-700 shadow-sm">
+                    <UserIcon className="h-3.5 w-3.5 text-blue-600" />
+                    <span>
+                      {result.patient_name || "Patient"} ({result.patient_id}){result.village ? ` · ${result.village}` : ""}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <span className={"flex h-12 w-12 items-center justify-center rounded-2xl " + accent.chip}>
                       <StethoscopeIcon className="h-6 w-6" />
                     </span>
                     <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{t.aiSymptom.aiAssessment}</p>
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{t.aiSymptom.resultHeading || t.aiSymptom.aiAssessment}</p>
                       <h2 className={"text-xl font-bold " + accent.text}>{result.level}</h2>
                     </div>
                   </div>
                   <span className={"rounded-full px-3 py-1 text-xs font-bold " + accent.chip}>
-                    {result.confidence}% {t.aiSymptom.matchSuffix}
+                    {result.confidence}% {t.aiSymptom.matchSuffix || "Confidence"}
                   </span>
                 </div>
                 <p className="mt-3 text-sm leading-relaxed text-slate-700">{result.summary}</p>
@@ -492,6 +693,19 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                   <div className={"h-full rounded-full " + accent.bar} style={{ width: result.confidence + "%" }} />
                 </div>
               </div>
+
+              {/* Urgent Care Alert for Emergency Cases */}
+              {result.urgent_care_guidance && (
+                <div className="flex items-start gap-3 rounded-3xl border border-red-200 bg-red-50 p-5 shadow-sm">
+                  <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-red-600 text-white shadow-sm">
+                    <AlertIcon className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-bold text-red-900">{t.aiSymptom.urgentNotice || "Urgent Clinical Guidance"}</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-red-800">{result.urgent_care_guidance}</p>
+                  </div>
+                </div>
+              )}
 
               {/* Recommended action */}
               <div className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
@@ -502,24 +716,24 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                 <p className="mt-2 text-sm leading-relaxed text-slate-600">{result.action}</p>
               </div>
 
-              {/* Suggested medicines */}
+              {/* Suggested medicines / supportive care */}
               <div className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
                 <div className="flex items-center gap-2">
                   <PillIcon className="h-5 w-5 text-blue-600" />
-                  <h3 className="text-base font-bold text-slate-800">{t.aiSymptom.suggestedMedicines}</h3>
+                  <h3 className="text-base font-bold text-slate-800">{t.aiSymptom.suggestedMeds || t.aiSymptom.suggestedMedicines}</h3>
                 </div>
                 <ul className="mt-3 flex flex-col gap-2">
-                  {result.medicines.map((m, i) => (
+                  {(result.medicines || []).map((m, i) => (
                     <li key={i} className="flex items-start gap-3 rounded-2xl bg-slate-50 p-3 text-sm text-slate-700">
                       <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
                         {i + 1}
                       </span>
-                      {m}
+                      <span>{m}</span>
                     </li>
                   ))}
                 </ul>
                 <p className="mt-3 text-xs text-slate-400">
-                  {t.aiSymptom.aiDisclaimer}
+                  {result.disclaimer || t.aiSymptom.aiDisclaimer}
                 </p>
               </div>
 
@@ -534,10 +748,10 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                     <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white">
                       <HospitalIcon className="h-6 w-6" />
                     </span>
-                    <span>
-                      <span className="block text-base font-bold text-blue-800">{t.aiSymptom.referPhcTitle}</span>
-                      <span className="block text-sm text-blue-700/80">{t.aiSymptom.referPhcDesc}</span>
-                    </span>
+                    <div>
+                      <span className="block text-base font-bold text-blue-800">{t.aiSymptom.referPhcBtn || t.aiSymptom.referPhcTitle}</span>
+                      <span className="block text-sm text-blue-700/80">{t.aiSymptom.referPhcDesc || "Transfer or refer patient for clinical examination within 24 hours"}</span>
+                    </div>
                   </span>
                   <BackIcon className="h-5 w-5 rotate-180 text-blue-600" />
                 </button>
@@ -553,12 +767,12 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                   <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-white/20">
                     <AlertIcon className="h-7 w-7" />
                   </span>
-                  <span>
-                    <span className="block text-lg font-bold">{t.aiSymptom.emergencyAlertTitle}</span>
+                  <div>
+                    <span className="block text-lg font-bold">{t.aiSymptom.emergencySosBtn || t.aiSymptom.emergencyAlertTitle}</span>
                     <span className="block text-sm text-red-50">
-                      {t.aiSymptom.emergencyAlertDesc}
+                      {t.aiSymptom.emergencyAlertDesc || "High risk condition detected. Immediate medical transport required."}
                     </span>
-                  </span>
+                  </div>
                 </button>
               ) : null}
 
@@ -567,7 +781,7 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                 onClick={reset}
                 className="mx-auto mt-1 text-sm font-semibold text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline"
               >
-                {t.aiSymptom.startNewAssessment}
+                {t.aiSymptom.reCheckBtn || t.aiSymptom.startNewAssessment || "Start New Assessment"}
               </button>
             </section>
           ) : (
@@ -576,7 +790,7 @@ export default function AISymptomChecker({ lang = "en", onLangChange, onBack, on
                 <SparkIcon className="h-6 w-6" />
               </span>
               <p className="mt-3 text-sm font-medium text-slate-600">
-                {t.aiSymptom.emptyState}
+                {t.aiSymptom.emptyState || "Enter patient symptoms above and tap 'Run AI Analysis' to generate triage recommendations."}
               </p>
             </div>
           )}

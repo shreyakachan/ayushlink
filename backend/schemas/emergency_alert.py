@@ -10,6 +10,7 @@ class EmergencySOSRequest(BaseModel):
     village: Optional[str] = Field(default=None, description="Patient village")
     emergency_type: str = Field(default="general_sos", description="Type of emergency (general_sos, maternal_emergency, cardiac_sos, trauma, etc.)")
     emergency_notes: Optional[str] = Field(default=None, description="Optional brief notes or context")
+    caller_role: Optional[str] = Field(default=None, description="Role of caller (e.g. asha, patient)")
     gps_coordinates: Optional[Dict[str, float]] = Field(default=None, description="Optional latitude/longitude {'lat': 19.9975, 'lng': 73.7898}")
     simulated_telemetry: Optional[Dict[str, Any]] = Field(default=None, description="Optional custom simulation parameters (SF, frequency, etc.)")
     offline_id: Optional[str] = Field(default=None, description="Client-side offline queue ID for deduplication and sync")
@@ -73,6 +74,7 @@ class EmergencyAlertResponse(BaseModel):
     acknowledged_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
     resolution_notes: Optional[str] = None
+    caller_role: Optional[str] = None
 
 
 class GatewayACKResponse(BaseModel):

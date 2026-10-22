@@ -4,14 +4,18 @@ from schemas.notification import NotificationResponse
 from services.security import (
     get_current_patient,
     get_current_doctor,
+    get_current_asha_worker,
     get_current_user_payload,
 )
 from services.notification_service import (
     get_patient_notifications,
     get_doctor_notifications,
+    get_asha_notifications,
     mark_notification_read,
     mark_doctor_notification_read,
     mark_all_doctor_notifications_read,
+    mark_asha_notification_read,
+    mark_all_asha_notifications_read,
 )
 
 router = APIRouter(tags=["Notifications & Alerts"])
@@ -94,4 +98,47 @@ async def mark_all_doctor_notifications_read_endpoint(
     doc_id = current_doctor.get("doctor_id") or str(current_doctor.get("_id"))
     await mark_all_doctor_notifications_read(doc_id)
     return {"status": "success", "message": "All doctor notifications marked as read"}
+
+
+# ==========================================
+# 3. ASHA Worker Notification Endpoints
+# ==========================================
+
+@router.get(
+    "/asha/notifications",
+    response_model=List[NotificationResponse],
+    summary="Retrieve notifications (ASHA Worker only)",
+    description="Allows an authenticated ASHA worker to fetch their scoped in-app alerts and notifications sorted newest first.",
+)
+async def get_asha_notifications_endpoint(
+    current_asha: dict = Depends(get_current_asha_worker),
+):
+    return await get_asha_notifications(current_asha)
+
+
+@router.patch(
+    "/asha/notifications/{notification_id}/read",
+    summary="Mark ASHA notification as read (ASHA Worker only)",
+    description="Marks a specific notification as read for the authenticated ASHA worker.",
+)
+async def mark_asha_notification_read_endpoint(
+    notification_id: str,
+    current_asha: dict = Depends(get_current_asha_worker),
+):
+    worker_id = current_asha.get("worker_id") or str(current_asha.get("_id"))
+    await mark_asha_notification_read(notification_id, worker_id)
+    return {"status": "success", "notification_id": notification_id, "is_read": True}
+
+
+@router.patch(
+    "/asha/notifications/read-all",
+    summary="Mark all ASHA notifications as read (ASHA Worker only)",
+    description="Marks all notifications for the authenticated ASHA worker as read.",
+)
+async def mark_all_asha_notifications_read_endpoint(
+    current_asha: dict = Depends(get_current_asha_worker),
+):
+    worker_id = current_asha.get("worker_id") or str(current_asha.get("_id"))
+    await mark_all_asha_notifications_read(worker_id)
+    return {"status": "success", "message": "All ASHA notifications marked as read"}
 

@@ -4,6 +4,7 @@ import {
   getNotifications,
   markNotificationRead,
   markAllDoctorNotificationsRead,
+  markAllAshaNotificationsRead,
   getAuthRole,
 } from "../lib/api.js"
 
@@ -117,6 +118,11 @@ export default function NotificationsScreen({ lang = "en", onBack, role = null }
     try {
       if (currentRole === "doctor") {
         await markAllDoctorNotificationsRead()
+      } else if (currentRole === "asha") {
+        await markAllAshaNotificationsRead()
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("ayushlink:notifications_updated"))
       }
     } catch (err) {
       console.error("Failed to mark all as read:", err)
@@ -132,6 +138,9 @@ export default function NotificationsScreen({ lang = "en", onBack, role = null }
       const targetId = item.notification_id || item.id
       if (targetId) {
         await markNotificationRead(targetId, currentRole)
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("ayushlink:notifications_updated"))
+        }
       }
     } catch (err) {
       console.error("Failed to mark notification read:", err)

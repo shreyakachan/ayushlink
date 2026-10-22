@@ -1,6 +1,6 @@
 import re
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from fastapi import HTTPException, status
 from database import (
@@ -26,6 +26,7 @@ from services.medical_service import (
     find_patient_by_id_or_pid,
     doc_to_symptom_response,
     get_patient_medical_record,
+    check_asha_patient_access,
 )
 
 
@@ -277,23 +278,171 @@ async def get_doctor_submitted_patients(current_doctor: dict) -> List[DoctorPati
     return await get_doctor_patient_cases(current_doctor)
 
 
-async def get_doctor_mch_cases(current_doctor: dict) -> List[DoctorMchCaseResponse]:
+def get_demo_mch_cases(target_villages: Optional[List[str]] = None, is_doctor: bool = False) -> List[DoctorMchCaseResponse]:
     """
-    Retrieve real maternal, pregnancy, and child health cases submitted by patients.
-    Filters symptoms containing maternal / pregnancy / ANC / pediatric keywords.
+    Deterministic demonstration records for Maternal & Child Health tracker.
+    Explicitly labelled with [DEMO] in the title, is_demo=True, and separate from real clinical records.
+    Scoped by village for ASHA workers, or all regional villages for Doctors.
+    """
+    now = datetime.now(timezone.utc)
+    due_soon_date = now + timedelta(days=2)
+    missed_date = now - timedelta(days=3)
+    missed_date_2 = now - timedelta(days=5)
+    upcoming_date = now + timedelta(days=12)
+
+    all_demo_records = [
+        DoctorMchCaseResponse(
+            patient_id="DEMO-MCH-01",
+            full_name="[DEMO] Sunita Devi",
+            village="Chandapur",
+            age=24,
+            phone="9876543210",
+            category="pregnancy",
+            trimester=3,
+            symptoms=["ANC visit 4 checkup", "Mild pedal edema", "Active fetal movement"],
+            description="[DEMO] Routine third-trimester antenatal checkup. Blood pressure 118/76 mmHg, normal fetal heart rate.",
+            recorded_at=now - timedelta(days=2),
+            due_date=due_soon_date,
+            due_status="due-soon",
+            severity="mild",
+            is_high_risk=False,
+            is_demo=True,
+            symptom_id="DEMO-SYM-01",
+        ),
+        DoctorMchCaseResponse(
+            patient_id="DEMO-MCH-02",
+            full_name="[DEMO] Radha Salunkhe",
+            village="Chandapur",
+            age=19,
+            phone="9876543211",
+            category="risk",
+            trimester=2,
+            symptoms=["High blood pressure", "Persistent headache", "ANC visit 2"],
+            description="[DEMO] High-risk second trimester pregnancy. Elevated blood pressure (145/95 mmHg) and low haemoglobin (8.9 g/dL).",
+            recorded_at=now - timedelta(days=4),
+            due_date=missed_date,
+            due_status="missed",
+            severity="severe",
+            is_high_risk=True,
+            risk_reason="High blood pressure / hypertension & Anaemia",
+            is_demo=True,
+            symptom_id="DEMO-SYM-02",
+        ),
+        DoctorMchCaseResponse(
+            patient_id="DEMO-MCH-03",
+            full_name="[DEMO] Baby of Sunita Devi",
+            village="Chandapur",
+            age=1,
+            phone="9876543210",
+            category="vaccination",
+            trimester=None,
+            symptoms=["OPV-1", "Pentavalent-1", "Rotavirus-1"],
+            description="[DEMO] 6-week infant immunization dose: OPV-1 and Pentavalent-1 scheduled.",
+            recorded_at=now - timedelta(days=5),
+            due_date=due_soon_date,
+            due_status="due-soon",
+            severity="moderate",
+            is_high_risk=False,
+            is_demo=True,
+            symptom_id="DEMO-SYM-03",
+        ),
+        DoctorMchCaseResponse(
+            patient_id="DEMO-MCH-04",
+            full_name="[DEMO] Om Salunkhe",
+            village="Chandapur",
+            age=1,
+            phone="9876543211",
+            category="growth",
+            trimester=None,
+            symptoms=["Growth check", "Weight: 5.1 kg", "Height: 57 cm"],
+            description="[DEMO] 5-month infant growth monitoring. Weight below expected growth curve; dietary counseling provided.",
+            recorded_at=now - timedelta(days=6),
+            due_date=missed_date_2,
+            due_status="missed",
+            severity="moderate",
+            is_high_risk=False,
+            is_demo=True,
+            symptom_id="DEMO-SYM-04",
+        ),
+        DoctorMchCaseResponse(
+            patient_id="DEMO-MCH-05",
+            full_name="[DEMO] Meena Joshi",
+            village="Nandgaon",
+            age=32,
+            phone="9876543212",
+            category="risk",
+            trimester=3,
+            symptoms=["Severe anaemia", "Fatigue", "Dizziness"],
+            description="[DEMO] High-risk pregnancy at 34 weeks with severe anaemia (Hb 7.2 g/dL). Referred to PHC for IV iron sucrose.",
+            recorded_at=now - timedelta(days=1),
+            due_date=due_soon_date,
+            due_status="due-soon",
+            severity="severe",
+            is_high_risk=True,
+            risk_reason="Severe anaemia (Hb 7.2 g/dL)",
+            is_demo=True,
+            symptom_id="DEMO-SYM-05",
+        ),
+        DoctorMchCaseResponse(
+            patient_id="DEMO-MCH-06",
+            full_name="[DEMO] Rohan Pawar",
+            village="Devgaon",
+            age=1,
+            phone="9876543213",
+            category="vaccination",
+            trimester=None,
+            symptoms=["MR-1 (Measles-Rubella)", "Vitamin A (Dose 1)"],
+            description="[DEMO] 9-month immunization visit for Measles-Rubella 1st dose and Vitamin A syrup.",
+            recorded_at=now - timedelta(days=8),
+            due_date=upcoming_date,
+            due_status="upcoming",
+            severity="mild",
+            is_high_risk=False,
+            is_demo=True,
+            symptom_id="DEMO-SYM-06",
+        ),
+    ]
+
+    if is_doctor or not target_villages:
+        return all_demo_records
+
+    # Filter strictly by ASHA assigned villages
+    clean_villages = [v.strip().lower() for v in target_villages if v]
+    filtered = []
+    for r in all_demo_records:
+        r_vil = r.village.strip().lower()
+        matched = False
+        for v in clean_villages:
+            if v == r_vil or v in r_vil or r_vil in v:
+                matched = True
+                break
+            if ("chanda" in v or "chandra" in v) and ("chanda" in r_vil or "chandra" in r_vil):
+                matched = True
+                break
+        if matched:
+            filtered.append(r)
+    return filtered
+
+
+async def get_doctor_mch_cases(current_user: dict) -> List[DoctorMchCaseResponse]:
+    """
+    Retrieve real maternal, pregnancy, and child health cases submitted by patients,
+    scoped appropriately for Doctors (all regional villages) and ASHA workers (assigned village/patients).
     """
     patients_col = get_collection(COLLECTION_PATIENTS)
     symptoms_col = get_collection(COLLECTION_SYMPTOMS)
     if patients_col is None or symptoms_col is None:
         return []
 
-    # Regex for maternal, pregnancy, ANC, delivery, vaccination, and child health terms
+    caller_role = current_user.get("role", "doctor")
+    is_asha = caller_role == "asha"
+
+    # Specific maternal, pregnancy, ANC, delivery, vaccination, and child health pattern
     mch_pattern = re.compile(
-        r"(pregnan|anc|trimester|maternal|fetal|foetal|labor|labour|delivery|postpartum|morning sickness|nausea|vomit|ultrasound|lactat|breastfeed|vaccin|immuniz|baby|infant|child|growth|rash|fever in baby|pediatric)",
+        r"(pregnan|anc|trimester|maternal|fetal|foetal|labor|labour|delivery|postpartum|morning sickness|ultrasound|lactat|breastfeed|antenatal|gravida|vaccin|immuniz|polio|opv|penta|bcg|measles|rubella|dpt|booster|baby|infant|pediatric|child|growth|milestone|underweight|malnutrition|stunting|wasting|height|head circumference)",
         re.IGNORECASE,
     )
 
-    # Find symptoms matching maternal keywords
     s_cursor = symptoms_col.find({
         "$or": [
             {"description": {"$regex": mch_pattern}},
@@ -302,32 +451,44 @@ async def get_doctor_mch_cases(current_doctor: dict) -> List[DoctorMchCaseRespon
     }).sort([("recorded_at", -1), ("created_at", -1)]).limit(50)
 
     mch_cases: List[DoctorMchCaseResponse] = []
-    seen_patient_ids = set()
+    seen_patient_categories = set()
 
     async for s_doc in s_cursor:
         pid = s_doc.get("patient_id")
-        if not pid or pid in seen_patient_ids:
+        if not pid:
             continue
 
         patient_doc = await find_patient_by_id_or_pid(pid)
         if not patient_doc:
             continue
 
-        seen_patient_ids.add(pid)
+        # For ASHA workers, strictly enforce village/patient authorization
+        if is_asha and not check_asha_patient_access(current_user, patient_doc):
+            continue
 
         desc = (s_doc.get("description") or "").lower()
         syms = [s.lower() for s in s_doc.get("symptoms", [])]
         combined_text = desc + " " + " ".join(syms)
 
         # Categorize
-        if "vaccin" in combined_text or "immuniz" in combined_text:
+        if any(k in combined_text for k in ["vaccin", "immuniz", "polio", "opv", "penta", "bcg", "measles", "rubella", "dpt", "booster"]):
             category = "vaccination"
-        elif "growth" in combined_text or "weight" in combined_text:
+        elif any(k in combined_text for k in ["growth", "milestone", "underweight", "malnutrition", "stunting", "wasting", "height", "head circumference"]):
             category = "growth"
-        elif s_doc.get("severity") == "severe" or "high risk" in combined_text or "hypertension" in combined_text or "bleeding" in combined_text:
+        elif any(k in combined_text for k in ["high risk", "hypertension", "pre-eclampsia", "bleeding", "haemoglobin", "anaemia", "anemia", "eclamp", "gestational diabetes"]):
             category = "risk"
+        elif any(k in combined_text for k in ["pregnan", "anc", "trimester", "maternal", "fetal", "foetal", "labor", "labour", "delivery", "postpartum", "morning sickness", "ultrasound", "lactat", "breastfeed", "antenatal"]):
+            category = "pregnancy"
+        elif any(k in combined_text for k in ["baby", "infant", "child", "pediatric"]):
+            category = "growth"
         else:
             category = "pregnancy"
+
+        # Deduplicate per (patient_id, category) so a patient can have distinct records in each tab
+        key = (str(patient_doc.get("patient_id", pid)), category)
+        if key in seen_patient_categories:
+            continue
+        seen_patient_categories.add(key)
 
         # Trimester detection
         trimester = None
@@ -337,21 +498,26 @@ async def get_doctor_mch_cases(current_doctor: dict) -> List[DoctorMchCaseRespon
             trimester = 2
         elif "3rd" in combined_text or "third trimester" in combined_text:
             trimester = 3
-        elif category == "pregnancy":
-            trimester = 2  # default estimate if pregnancy
 
-        is_high_risk = category == "risk" or s_doc.get("severity") == "severe"
+        is_high_risk = (
+            category == "risk"
+            or s_doc.get("severity") == "severe"
+            or any(k in combined_text for k in ["high risk", "hypertension", "bleeding", "anaemia", "anemia", "pre-eclampsia"])
+        )
         risk_reason = None
         if is_high_risk:
-            if "anaemia" in combined_text or "low haemoglobin" in combined_text:
+            if "anaemia" in combined_text or "anemia" in combined_text or "low haemoglobin" in combined_text:
                 risk_reason = "Low haemoglobin (anaemia)"
             elif "pressure" in combined_text or "hypertension" in combined_text:
                 risk_reason = "High blood pressure / hypertension"
             elif "bleeding" in combined_text:
                 risk_reason = "Spotting / bleeding reported"
+            elif s_doc.get("severity") == "severe":
+                risk_reason = "Severe clinical symptoms reported"
             else:
-                risk_reason = "Severe symptoms reported during pregnancy"
+                risk_reason = "High-risk maternal indicator detected"
 
+        recorded_time = s_doc.get("recorded_at") or s_doc.get("created_at")
         mch_cases.append(
             DoctorMchCaseResponse(
                 patient_id=patient_doc.get("patient_id", pid),
@@ -363,14 +529,23 @@ async def get_doctor_mch_cases(current_doctor: dict) -> List[DoctorMchCaseRespon
                 trimester=trimester,
                 symptoms=s_doc.get("symptoms", []),
                 description=s_doc.get("description", ""),
-                recorded_at=s_doc.get("recorded_at") or s_doc.get("created_at"),
+                recorded_at=recorded_time,
                 severity=s_doc.get("severity", "moderate"),
                 is_high_risk=is_high_risk,
                 risk_reason=risk_reason,
+                symptom_id=s_doc.get("symptom_id"),
+                due_date=s_doc.get("due_date"),
+                due_status=s_doc.get("due_status"),
+                is_demo=False,
             )
         )
 
-    return mch_cases
+    # Scoped demonstration records for complete representation without corrupting clinical DB
+    target_vils = current_user.get("assigned_villages", []) if is_asha else None
+    demo_records = get_demo_mch_cases(target_villages=target_vils, is_doctor=(caller_role == "doctor"))
+
+    # Return verified real clinical records first, followed by demonstration records
+    return mch_cases + demo_records
 
 
 async def get_patient_records_for_doctor(

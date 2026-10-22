@@ -15,6 +15,7 @@ import PendingSyncScreen from "./components/PendingSyncScreen.jsx"
 import NotificationsScreen from "./components/NotificationsScreen.jsx"
 import ProfileScreen from "./components/ProfileScreen.jsx"
 import EmergencySOSScreen from "./components/EmergencySOSScreen.jsx"
+import AshaEmergencySOSScreen from "./components/AshaEmergencySOSScreen.jsx"
 import MedicineInventoryScreen from "./components/MedicineInventoryScreen.jsx"
 import PatientHomeScreen from "./components/PatientHomeScreen.jsx"
 import PatientSymptomScreen from "./components/PatientSymptomScreen.jsx"
@@ -74,6 +75,7 @@ export default function App() {
   const [scannedPatient, setScannedPatient] = useState(null)
   const [consultationPatient, setConsultationPatient] = useState(null)
   const [callPatient, setCallPatient] = useState(null)
+  const [aiPatient, setAiPatient] = useState(null)
 
   const setScreen = (newScreen) => {
     if (VALID_SCREENS.has(newScreen)) {
@@ -370,6 +372,7 @@ export default function App() {
       )}
       {activeScreen === "ai" && (
         <AISymptomChecker
+          patient={aiPatient}
           lang={ashaLang}
           onLangChange={setAshaLang}
           onBack={goToRoleHome}
@@ -389,6 +392,10 @@ export default function App() {
             setCallPatient(p)
             setCallSessionId((n) => n + 1)
             setScreen("patient-call")
+          }}
+          onCheckSymptoms={(p) => {
+            setAiPatient(p)
+            setScreen("ai")
           }}
           onRegisterNew={() => setScreen("register")}
         />
@@ -424,7 +431,7 @@ export default function App() {
           }}
         />
       )}
-      {activeScreen === "sos" && <EmergencySOSScreen lang={ashaLang} onBack={goToRoleHome} />}
+      {activeScreen === "sos" && <AshaEmergencySOSScreen lang={ashaLang} onBack={goToRoleHome} />}
       {activeScreen === "inventory" && (
         <MedicineInventoryScreen lang={ashaLang} onBack={goToRoleHome} />
       )}

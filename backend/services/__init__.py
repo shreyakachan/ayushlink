@@ -46,6 +46,17 @@ from services.notification_service import (
     mark_doctor_notification_read,
     mark_all_doctor_notifications_read,
 )
+from services.symptom_analysis_service import evaluate_symptom_triage
+from services.asha_call_service import (
+    create_asha_audio_call,
+    get_patient_active_call,
+    get_asha_active_call,
+    decide_asha_call,
+    cancel_asha_call,
+    end_asha_call,
+    get_available_asha_workers,
+    get_call_details,
+)
 
 __all__ = [
     "hash_password",
@@ -86,4 +97,13 @@ __all__ = [
     "mark_notification_read",
     "mark_doctor_notification_read",
     "mark_all_doctor_notifications_read",
+    "evaluate_symptom_triage",
+    "create_asha_audio_call",
+    "get_patient_active_call",
+    "get_asha_active_call",
+    "decide_asha_call",
+    "cancel_asha_call",
+    "end_asha_call",
+    "get_available_asha_workers",
+    "get_call_details",
 ]

@@ -10,6 +10,8 @@ from routes.notifications import router as notification_router
 from routes.sync import router as sync_router
 from routes.inventory import router as inventory_router
 from routes.lora_emergency import router as lora_emergency_router
+from routes.symptom_analysis import router as symptom_analysis_router
+from routes.asha_calls import router as asha_calls_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -23,5 +25,7 @@ api_router.include_router(notification_router)
 api_router.include_router(sync_router)
 api_router.include_router(inventory_router)
 api_router.include_router(lora_emergency_router)
+api_router.include_router(symptom_analysis_router)
+api_router.include_router(asha_calls_router)
 
 __all__ = ["api_router"]

@@ -111,6 +111,7 @@ def doc_to_emergency_response(doc: dict, asha_worker: Optional[dict] = None) -> 
         acknowledged_at=doc.get("acknowledged_at"),
         resolved_at=doc.get("resolved_at"),
         resolution_notes=doc.get("resolution_notes"),
+        caller_role=doc.get("caller_role"),
     )
 
 
@@ -186,7 +187,11 @@ async def trigger_patient_emergency_sos(
     if target_pid:
         patient_doc = await patients_col.find_one({"$or": [{"patient_id": target_pid}, {"phone": target_pid}]})
 
-    caller_role = current_patient.get("role", "patient")
+    caller_role = getattr(req, "caller_role", None) or current_patient.get("role", "patient")
+    if current_patient.get("role") == "asha" or current_patient.get("worker_id"):
+        caller_role = "asha"
+    elif current_patient.get("role") == "doctor" or current_patient.get("doctor_id"):
+        caller_role = "doctor"
     if not patient_doc and caller_role == "patient" and not current_patient.get("doctor_id") and not current_patient.get("worker_id"):
         phone = current_patient.get("phone")
         sub = current_patient.get("patient_id") or current_patient.get("sub")
@@ -278,6 +283,7 @@ async def trigger_patient_emergency_sos(
         "patient_name": patient_name,
         "patient_phone": patient_phone,
         "village": village,
+        "caller_role": caller_role,
         "asha_worker_id": asha_worker_id,
         "asha_worker_name": asha_name,
         "asha_worker_phone": asha_phone,
@@ -464,8 +470,6 @@ async def get_active_emergency_alerts(current_user: dict) -> List[EmergencyAlert
     role = current_user.get("role", "patient")
     query: Dict[str, Any] = {
         "status": {"$in": PENDING_SOS_STATUSES},
-        "asha_status": {"$ne": "ACKNOWLEDGED"},
-        "phc_status": {"$ne": "ACKNOWLEDGED"},
     }
 
     if role == "patient":
@@ -473,6 +477,11 @@ async def get_active_emergency_alerts(current_user: dict) -> List[EmergencyAlert
         query["patient_id"] = pid
 
     elif role == "asha":
+        # ASHA dashboard only alerts on incoming emergencies (e.g. from patients),
+        # not on emergencies initiated by an ASHA worker herself.
+        query["caller_role"] = {"$ne": "asha"}
+        query["emergency_notes"] = {"$not": {"$regex": r"triggered by ASHA", "$options": "i"}}
+        query["asha_status"] = {"$ne": "ACKNOWLEDGED"}
         worker_id = current_user.get("worker_id") or str(current_user.get("_id"))
         assigned_villages = current_user.get("assigned_villages", [])
         village_queries = []
@@ -491,8 +500,8 @@ async def get_active_emergency_alerts(current_user: dict) -> List[EmergencyAlert
         query["$or"] = or_conditions
 
     elif role == "doctor":
-        # Doctors see all active regional emergencies
-        pass
+        # Doctors see all active regional emergencies not yet acknowledged by doctor
+        query["phc_status"] = {"$ne": "ACKNOWLEDGED"}
 
     cursor = alerts_col.find(query).sort("created_at", -1).limit(50)
     docs = await cursor.to_list(length=50)

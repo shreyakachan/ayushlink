@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react"
 import { ASHA_LANGUAGES, ashaT } from "../lib/ashaI18n.js"
-import { getAuthUser, getAshaCases, getActiveEmergencyAlerts, updateEmergencyAlertStatus } from "../lib/api.js"
+import { getAuthUser, getAshaCases, getActiveEmergencyAlerts, updateEmergencyAlertStatus, getNotifications } from "../lib/api.js"
 import { getPendingItems } from "../lib/offlineDb.js"
 import { unlockAudioContext, startEmergencySiren, stopEmergencySiren, isSirenPlaying } from "../lib/emergencySiren.js"
 import useOnlineStatus from "../hooks/useOnlineStatus.js"
+import AshaAudioCallModal from "./AshaAudioCallModal.jsx"
 
 /**
  * AyushLink — Home Screen (Dashboard)
@@ -53,6 +54,7 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
   const acknowledgedIdsRef = useRef(new Set())
   const activeEmergenciesRef = useRef([])
   activeEmergenciesRef.current = activeEmergencies
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0)
   const t = ashaT(lang)
 
   // One-time user interaction listener to unlock AudioContext for ASHA dashboard
@@ -68,9 +70,11 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
           window.removeEventListener(evt, handleUserInteraction, true)
         })
       }
-      // If there is already an active unacknowledged emergency waiting for audio, start it
+      // If there is already an active unacknowledged incoming emergency waiting for audio, start it
       const unacked = (activeEmergenciesRef.current || []).filter(
-        (a) => !acknowledgedIdsRef.current.has(a.alert_id || a.id)
+        (a) => !acknowledgedIdsRef.current.has(a.alert_id || a.id) &&
+               a.caller_role !== "asha" &&
+               !a.emergency_notes?.includes("triggered by ASHA")
       )
       if (unacked.length > 0 && !isSirenPlaying()) {
         const res = await startEmergencySiren()
@@ -110,6 +114,20 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
           liveList = liveCases
         }
       } catch {}
+
+      try {
+        const notifs = await getNotifications("asha")
+        if (Array.isArray(notifs)) {
+          const unread = notifs.filter((n) =>
+            n.is_read !== undefined ? !n.is_read : (n.unread !== undefined ? n.unread : false)
+          ).length
+          setUnreadNotificationCount(unread)
+        } else {
+          setUnreadNotificationCount(0)
+        }
+      } catch {
+        setUnreadNotificationCount(0)
+      }
 
       try {
         const pending = await getPendingItems()
@@ -165,10 +183,12 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
     }
     window.addEventListener("ayushlink:pending_updated", onPendingUpdated)
     window.addEventListener("ayushlink:sync_complete", loadDashboard)
+    window.addEventListener("ayushlink:notifications_updated", loadDashboard)
     window.addEventListener("focus", onPendingUpdated)
     return () => {
       window.removeEventListener("ayushlink:pending_updated", onPendingUpdated)
       window.removeEventListener("ayushlink:sync_complete", loadDashboard)
+      window.removeEventListener("ayushlink:notifications_updated", loadDashboard)
       window.removeEventListener("focus", onPendingUpdated)
     }
   }, [])
@@ -183,9 +203,10 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
         const list = await getActiveEmergencyAlerts()
         if (!isMounted) return
         if (Array.isArray(list)) {
-          // Backend returns only pending/unhandled SOS alerts, filter out already acknowledged
+          // Backend returns only pending/unhandled SOS alerts, filter out already acknowledged and self-initiated
           const pendingAlerts = [...list]
             .filter((a) => !acknowledgedIdsRef.current.has(a.alert_id || a.id))
+            .filter((a) => a.caller_role !== "asha" && !a.emergency_notes?.includes("triggered by ASHA"))
             .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
 
           // Strictly display ONLY the single newest unacknowledged pending emergency alert
@@ -373,10 +394,12 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
     {
       id: "notifications",
       title: t.dashboard.notificationsTitle,
-      desc: `3 ${t.dashboard.newUpdatesDesc}`,
+      desc: unreadNotificationCount > 0
+        ? `${unreadNotificationCount} ${t.dashboard.newUpdatesDesc}`
+        : (t.notifications?.allCaughtUp || "All caught up"),
       Icon: BellIcon,
       tone: "blue",
-      count: 3,
+      count: unreadNotificationCount > 0 ? unreadNotificationCount : undefined,
     },
   ]
 
@@ -492,9 +515,11 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
                 aria-label={t.dashboard.notificationsTitle}
               >
                 <BellIcon className="h-5 w-5" />
-                <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-                  {cases.filter((c) => c.status === "critical" || c.status === "review").length || 0}
-                </span>
+                {unreadNotificationCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                    {unreadNotificationCount}
+                  </span>
+                )}
               </button>
             </div>
           </header>
@@ -847,6 +872,9 @@ export default function HomeScreen({ lang = "en", onLangChange, onSelect, onBack
           ))}
         </div>
       </nav>
+
+      {/* Incoming / Active Audio Call Modal */}
+      <AshaAudioCallModal lang={lang} />
     </div>
   )
 }

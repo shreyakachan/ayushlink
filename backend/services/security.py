@@ -192,3 +192,22 @@ async def get_current_doctor(
     doctor["role"] = "doctor"
     return doctor
 
+
+async def get_current_doctor_or_asha(
+    payload: Dict[str, Any] = Depends(get_current_user_payload),
+) -> Dict[str, Any]:
+    """
+    Dependency that authorizes either an active Doctor or an active ASHA Worker.
+    Patients, unauthenticated callers, or invalid roles are rejected with 403 Forbidden.
+    """
+    role = payload.get("role")
+    if role == "doctor":
+        return await get_current_doctor(payload)
+    elif role == "asha":
+        return await get_current_asha_worker(payload)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: Doctor or ASHA Worker credentials required.",
+        )
+

@@ -57,6 +57,15 @@ from schemas.emergency_alert import (
     EmergencyAlertResponse,
     GatewayACKResponse,
 )
+from schemas.symptom_analysis import (
+    SymptomAnalysisRequest,
+    SymptomAnalysisResponse,
+)
+from schemas.asha_call import (
+    AshaCallCreateRequest,
+    AshaCallDecisionRequest,
+    AshaCallResponse,
+)
 
 __all__ = [
     "HealthResponse",
@@ -100,4 +109,9 @@ __all__ = [
     "EmergencyStatusUpdate",
     "EmergencyAlertResponse",
     "GatewayACKResponse",
+    "SymptomAnalysisRequest",
+    "SymptomAnalysisResponse",
+    "AshaCallCreateRequest",
+    "AshaCallDecisionRequest",
+    "AshaCallResponse",
 ]

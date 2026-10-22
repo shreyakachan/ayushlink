@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from "react"
 import { ashaT } from "../lib/ashaI18n.js"
-import { getDoctorMchCases } from "../lib/api.js"
+import { getMchCases, getDoctorMchCases } from "../lib/api.js"
 
 /**
  * AyushLink — Maternal & Child Health Hub
@@ -31,24 +31,29 @@ export default function MaternalChildHealthScreen({ lang = "en", onBack }) {
   const [activeTab, setActiveTab] = useState("pregnancy")
   const [mchCases, setMchCases] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [remindedIds, setRemindedIds] = useState(() => new Set())
   const t = ashaT(lang)
 
-  useEffect(() => {
-    async function loadMchData() {
-      try {
-        setLoading(true)
-        const liveCases = await getDoctorMchCases()
-        if (Array.isArray(liveCases)) {
-          setMchCases(liveCases)
-        }
-      } catch (err) {
-        console.error("Failed to load MCH cases:", err)
+  const loadMchData = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const liveCases = await getMchCases()
+      if (Array.isArray(liveCases)) {
+        setMchCases(liveCases)
+      } else {
         setMchCases([])
-      } finally {
-        setLoading(false)
       }
+    } catch (err) {
+      console.error("Failed to load MCH cases:", err)
+      setError(err?.message || "Failed to load Maternal & Child Health records. Please try again.")
+    } finally {
+      setLoading(false)
     }
+  }
+
+  useEffect(() => {
     loadMchData()
   }, [])
 
@@ -76,13 +81,37 @@ export default function MaternalChildHealthScreen({ lang = "en", onBack }) {
     [mchCases]
   )
 
+  // Calculate actual Due soon, Missed visits, and High-risk counts from genuine dates/fields
   const counts = useMemo(() => {
-    return {
-      dueSoon: pregnancyCases.length,
-      missed: mchCases.filter((c) => c.severity === "moderate").length,
-      highRisk: highRiskCases.length,
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    let dueSoon = 0
+    let missed = 0
+    let highRisk = 0
+
+    for (const c of mchCases) {
+      if (c.is_high_risk || c.category === "risk" || c.severity === "severe") {
+        highRisk += 1
+      }
+      if (c.due_status === "missed") {
+        missed += 1
+      } else if (c.due_status === "due-soon") {
+        dueSoon += 1
+      } else if (c.due_date) {
+        const d = new Date(c.due_date)
+        if (!isNaN(d.getTime())) {
+          d.setHours(0, 0, 0, 0)
+          const diffDays = Math.round((d - today) / (24 * 60 * 60 * 1000))
+          if (diffDays < 0) {
+            missed += 1
+          } else if (diffDays <= 7) {
+            dueSoon += 1
+          }
+        }
+      }
     }
-  }, [pregnancyCases, mchCases, highRiskCases])
+    return { dueSoon, missed, highRisk }
+  }, [mchCases])
 
   const sendReminder = (id) => {
     setRemindedIds((prev) => {
@@ -191,7 +220,22 @@ export default function MaternalChildHealthScreen({ lang = "en", onBack }) {
           </div>
 
           {/* Tab Content */}
-          {loading ? (
+          {error ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl border border-rose-200 bg-rose-50/40 p-8 text-center shadow-sm">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
+                <AlertIcon className="h-6 w-6" />
+              </span>
+              <p className="text-base font-bold text-slate-800">Unable to load Maternal & Child Health records</p>
+              <p className="text-xs text-slate-500 max-w-md">{error}</p>
+              <button
+                type="button"
+                onClick={loadMchData}
+                className="mt-2 inline-flex items-center gap-2 rounded-2xl bg-rose-600 px-5 py-2.5 text-xs font-bold text-white shadow-md shadow-rose-600/25 transition hover:bg-rose-700 active:scale-95"
+              >
+                Retry
+              </button>
+            </div>
+          ) : loading ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl border border-slate-100 bg-white p-12 text-center shadow-sm">
               <span className="flex h-10 w-10 animate-spin items-center justify-center rounded-2xl bg-rose-50 text-rose-600">
                 <PregnancyIcon className="h-5 w-5" />
@@ -270,6 +314,15 @@ function SummaryChip({ label, value, tone, active, onClick }) {
   )
 }
 
+function stripDemoText(str) {
+  if (typeof str !== "string") return str
+  return str
+    .replace(/^\[\s*demo\s*\]\s*/i, "")
+    .replace(/^\(\s*demo\s*\)\s*/i, "")
+    .replace(/^demo[\s:-]+/i, "")
+    .trim()
+}
+
 /* --- MCH Case List --- */
 function MchCaseList({ cases, emptyMsg, reminded, onRemind, t }) {
   if (!cases || cases.length === 0) {
@@ -286,20 +339,27 @@ function MchCaseList({ cases, emptyMsg, reminded, onRemind, t }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {cases.map((c) => {
+      {cases.map((c, idx) => {
         const isReminded = reminded.has(c.patient_id)
-        const displayName = (c.full_name || "Patient")
+        const cleanFullName = stripDemoText(c.full_name) || "Patient"
+        const displayName = cleanFullName
           .split(" ")
           .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : ""))
           .join(" ")
         const initials = displayName
           .split(" ")
+          .filter(Boolean)
           .map((w) => w[0])
           .slice(0, 2)
           .join("")
+        const uniqueKey = `${c.patient_id}-${c.category || 'mch'}-${c.symptom_id || idx}`
+        const complaintText = c.symptoms?.length
+          ? c.symptoms.map((s) => stripDemoText(s)).join(", ")
+          : (stripDemoText(c.description) || "Maternal consultation")
+
         return (
           <div
-            key={c.patient_id}
+            key={uniqueKey}
             className="flex flex-col gap-3 rounded-3xl border border-slate-100 bg-white p-4.5 shadow-sm sm:flex-row sm:items-center sm:justify-between transition hover:border-rose-200 hover:shadow-md"
           >
             <div className="flex min-w-0 items-start gap-3.5">
@@ -329,7 +389,7 @@ function MchCaseList({ cases, emptyMsg, reminded, onRemind, t }) {
                 {/* Chief Complaint / Symptoms */}
                 <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                   <span className="text-[11px] font-medium text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
-                    {c.symptoms?.length ? c.symptoms.join(", ") : (c.description || "Maternal consultation")}
+                    {complaintText}
                   </span>
                 </div>
               </div>
@@ -337,9 +397,9 @@ function MchCaseList({ cases, emptyMsg, reminded, onRemind, t }) {
 
             <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end self-end sm:self-center">
               <span className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                c.is_high_risk ? STATUS_TONE.red : STATUS_TONE.rose || STATUS_TONE.blue
+                c.is_high_risk ? STATUS_TONE.red : c.due_status === "missed" ? STATUS_TONE.amber : STATUS_TONE.rose || STATUS_TONE.blue
               }`}>
-                Submitted {formatDate(c.recorded_at)}
+                {c.due_status === "missed" && c.due_date ? `Missed visit (${formatDate(c.due_date)})` : c.due_date ? `Due ${formatDate(c.due_date)}` : `Submitted ${formatDate(c.recorded_at)}`}
               </span>
               <button
                 type="button"

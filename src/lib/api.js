@@ -93,21 +93,119 @@ export function getPatientAuthUser() {
 
 /**
  * Retrieve patient JWT token strictly separated from other roles.
+ * Guaranteed to never return a doctor or ASHA token.
  */
 export function getPatientAuthToken() {
   try {
+    // 1. Dedicated patient token storage
+    const patientTok = localStorage.getItem("ayushlink_patient_token")
+    if (patientTok) {
+      const check = checkTokenExpiry(patientTok)
+      if (!check.expired && check.payload?.role === "patient") {
+        return patientTok
+      }
+    }
+
+    // 2. Active generic token IF it belongs to a patient
     const role = getAuthRole()
     if (role === "patient") {
       const tok = getAuthToken()
-      if (tok) return tok
+      if (tok) {
+        const check = checkTokenExpiry(tok)
+        if (!check.expired && check.payload?.role === "patient") {
+          return tok
+        }
+      }
     }
-    const tok = localStorage.getItem("ayushlink_patient_token")
-    if (tok) return tok
+
+    // 3. Offline accounts cache
     const cacheRaw = localStorage.getItem(ACCOUNTS_CACHE_KEY)
     if (cacheRaw) {
       const cache = JSON.parse(cacheRaw)
-      const pEntry = cache["patient_9324998108"] || cache["patient_p-4559"] || Object.values(cache).find(e => e.role === "patient" && !e.user?.doctor_id)
-      if (pEntry?.token) return pEntry.token
+      const pEntry =
+        cache["patient_9324998108"] ||
+        cache["patient_p-4559"] ||
+        Object.values(cache).find(
+          (e) => e.role === "patient" && e.token && checkTokenExpiry(e.token).payload?.role === "patient"
+        )
+      if (pEntry?.token) {
+        const check = checkTokenExpiry(pEntry.token)
+        if (!check.expired && check.payload?.role === "patient") {
+          return pEntry.token
+        }
+      }
+    }
+  } catch {}
+  return null
+}
+
+/**
+ * Retrieve ASHA JWT token strictly separated from patient and doctor roles.
+ * Guaranteed to never return a patient or doctor token.
+ */
+export function getAshaAuthToken() {
+  try {
+    // 1. Dedicated ASHA token storage
+    const ashaTok = localStorage.getItem("ayushlink_asha_token")
+    if (ashaTok) {
+      const check = checkTokenExpiry(ashaTok)
+      if (!check.expired && check.payload?.role === "asha") {
+        return ashaTok
+      }
+    }
+
+    // 2. Active generic token IF it belongs to an ASHA worker
+    const role = getAuthRole()
+    if (role === "asha") {
+      const tok = getAuthToken()
+      if (tok) {
+        const check = checkTokenExpiry(tok)
+        if (!check.expired && check.payload?.role === "asha") {
+          return tok
+        }
+      }
+    }
+
+    // 3. Offline accounts cache
+    const cacheRaw = localStorage.getItem(ACCOUNTS_CACHE_KEY)
+    if (cacheRaw) {
+      const cache = JSON.parse(cacheRaw)
+      const aEntry =
+        cache["asha_9876543210"] ||
+        Object.values(cache).find(
+          (e) => e.role === "asha" && e.token && checkTokenExpiry(e.token).payload?.role === "asha"
+        )
+      if (aEntry?.token) {
+        const check = checkTokenExpiry(aEntry.token)
+        if (!check.expired && check.payload?.role === "asha") {
+          return aEntry.token
+        }
+      }
+    }
+  } catch {}
+  return null
+}
+
+/**
+ * Retrieve ASHA worker user profile strictly separated from patient and doctor roles.
+ */
+export function getAshaAuthUser() {
+  try {
+    const role = getAuthRole()
+    if (role === "asha") {
+      const u = getAuthUser()
+      if (u && (u.worker_id || u.role === "asha")) return u
+    }
+    const raw = localStorage.getItem("ayushlink_asha_user")
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed) return parsed
+    }
+    const cacheRaw = localStorage.getItem(ACCOUNTS_CACHE_KEY)
+    if (cacheRaw) {
+      const cache = JSON.parse(cacheRaw)
+      const aEntry = cache["asha_9876543210"] || Object.values(cache).find(e => e.role === "asha" && e.user)
+      if (aEntry?.user) return aEntry.user
     }
   } catch {}
   return null
@@ -572,6 +670,30 @@ export async function submitPatientSymptoms(symptomData, patientId = null) {
   })
 }
 
+export async function analyzeSymptoms(analysisData) {
+  const role = getAuthRole()
+  if (role === "asha" && analysisData.patient_id) {
+    try {
+      return await apiFetch(`/asha/patients/${encodeURIComponent(analysisData.patient_id)}/analyze-symptoms`, {
+        method: "POST",
+        body: analysisData,
+      })
+    } catch (err) {
+      if (err.status && err.status >= 500) {
+        return await apiFetch("/asha/analyze-symptoms", {
+          method: "POST",
+          body: analysisData,
+        })
+      }
+      throw err
+    }
+  }
+  return await apiFetch("/asha/analyze-symptoms", {
+    method: "POST",
+    body: analysisData,
+  })
+}
+
 export async function getPatientSymptoms(patientId = null) {
   return await apiFetch("/patient/symptoms")
 }
@@ -631,13 +753,11 @@ export async function getDoctorPatients() {
   }
 }
 
-export async function getDoctorMchCases() {
-  try {
-    return await apiFetch("/doctor/mch-cases")
-  } catch {
-    return []
-  }
+export async function getMchCases() {
+  return await apiFetch("/doctor/mch-cases")
 }
+
+export const getDoctorMchCases = getMchCases
 
 export async function assignDoctorCase(patientId) {
   return await apiFetch(`/doctor/cases/${patientId}/assign`, {
@@ -646,6 +766,10 @@ export async function assignDoctorCase(patientId) {
 }
 
 export async function getAshaWorkersList() {
+  const role = getAuthRole()
+  if (role === "patient") {
+    return await getAshaCallWorkersList()
+  }
   return await apiFetch("/doctor/asha-workers")
 }
 
@@ -680,10 +804,28 @@ export async function createDoctorPrescription(prescriptionData) {
    Teleconsultations API Methods
    ========================================================================= */
 
-export async function requestConsultation(consultationData) {
+export async function requestConsultation(consultationData, options = {}) {
+  const role = getAuthRole()
+  let token = options.token
+
+  if (!token) {
+    if (role === "asha") {
+      token = getAshaAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "asha" ? getAuthToken() : null)
+    } else {
+      // Default to patient-specific bearer token
+      token = getPatientAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "patient" ? getAuthToken() : null)
+    }
+  }
+
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers || {}),
+  }
+
   return await apiFetch("/consultations/request", {
     method: "POST",
     body: consultationData,
+    headers,
   })
 }
 
@@ -705,10 +847,27 @@ export async function decideConsultation(consultationId, action, notes = null) {
   })
 }
 
-export async function updateConsultationStatus(consultationId, status, notes = null) {
+export async function updateConsultationStatus(consultationId, status, notes = null, options = {}) {
+  const role = getAuthRole()
+  let token = options.token
+
+  if (!token) {
+    if (role === "patient") {
+      token = getPatientAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "patient" ? getAuthToken() : null)
+    } else if (role === "asha") {
+      token = getAshaAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "asha" ? getAuthToken() : null)
+    }
+  }
+
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers || {}),
+  }
+
   return await apiFetch(`/consultations/${consultationId}/status`, {
     method: "PATCH",
     body: { status, notes },
+    headers,
   })
 }
 
@@ -717,7 +876,18 @@ export async function getConsultationHistory() {
 }
 
 export async function getPatientActiveVideoRequest() {
-  return await apiFetch("/consultations/active-request")
+  const patientToken = getPatientAuthToken()
+  const headers = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    Pragma: "no-cache",
+  }
+  if (patientToken) {
+    headers["Authorization"] = `Bearer ${patientToken}`
+  }
+  return await apiFetch(`/consultations/active-request?_t=${Date.now()}`, {
+    headers,
+    cache: "no-store",
+  })
 }
 
 export async function getDoctorVideoRequests() {
@@ -777,6 +947,22 @@ export async function getDoctorNotifications() {
   return await apiFetch("/doctor/notifications")
 }
 
+export async function getAshaNotifications() {
+  return await apiFetch("/asha/notifications")
+}
+
+export async function markAshaNotificationRead(notificationId) {
+  return await apiFetch(`/asha/notifications/${notificationId}/read`, {
+    method: "PATCH",
+  })
+}
+
+export async function markAllAshaNotificationsRead() {
+  return await apiFetch("/asha/notifications/read-all", {
+    method: "PATCH",
+  })
+}
+
 export async function markDoctorNotificationRead(notificationId) {
   return await apiFetch(`/doctor/notifications/${notificationId}/read`, {
     method: "PATCH",
@@ -795,22 +981,32 @@ export async function getPatientNotifications() {
 
 export async function getNotifications(role = null) {
   const currentRole = role || getAuthRole()
+  if (currentRole === "asha") {
+    return await getAshaNotifications()
+  }
   if (currentRole === "doctor") {
     return await getDoctorNotifications()
   }
   if (currentRole === "patient") {
     return await getPatientNotifications()
   }
-  // Default to doctor if token is doctor, else patient
+  // Try role-based detection fallback
   try {
-    return await apiFetch("/doctor/notifications")
+    return await apiFetch("/asha/notifications")
   } catch {
-    return await apiFetch("/patient/notifications")
+    try {
+      return await apiFetch("/doctor/notifications")
+    } catch {
+      return await apiFetch("/patient/notifications")
+    }
   }
 }
 
 export async function markNotificationRead(notificationId, role = null) {
   const currentRole = role || getAuthRole()
+  if (currentRole === "asha") {
+    return await markAshaNotificationRead(notificationId)
+  }
   if (currentRole === "doctor") {
     return await markDoctorNotificationRead(notificationId)
   }
@@ -843,9 +1039,9 @@ export async function sendEmergencySOS(emergencyData = {}) {
     offline_id: emergencyData.offline_id || emergencyData.offlineId || null,
   }
 
-  const headers = {}
+  const headers = { ...(emergencyData.headers || {}) }
   const patientToken = getPatientAuthToken()
-  if (patientToken && getAuthRole() !== "patient") {
+  if (!headers["Authorization"] && patientToken && getAuthRole() !== "patient") {
     headers["Authorization"] = `Bearer ${patientToken}`
   }
 
@@ -892,6 +1088,170 @@ export async function updateEmergencyAlertStatus(alertId, updateData) {
   return await apiFetch(`/emergency/alerts/${alertId}/status`, {
     method: "PATCH",
     body: updateData,
+  })
+}
+
+/* =========================================================================
+   Patient-to-ASHA 2-Way Audio Calling API Methods (Part 2)
+   ========================================================================= */
+
+/**
+ * Retrieve list of active ASHA workers available for audio calling.
+ * Calls GET /api/asha-calls/workers
+ *
+ * @returns {Promise<Array>} List of ASHA worker objects
+ */
+export async function getAshaCallWorkersList() {
+  const patientToken = getPatientAuthToken() || getAuthToken()
+  const headers = {}
+  if (patientToken) {
+    headers["Authorization"] = `Bearer ${patientToken}`
+  }
+  return await apiFetch("/asha-calls/workers", { headers })
+}
+
+/**
+ * Patient requests a 2-way audio call with a specific ASHA worker.
+ * Calls POST /api/asha-calls/request
+ *
+ * @param {Object} data - { target_worker_id: string, reason?: string }
+ * @returns {Promise<Object>} AshaCallResponse
+ */
+export async function requestAshaAudioCall({ target_worker_id, reason = "Audio consultation" }) {
+  const patientToken = getPatientAuthToken() || getAuthToken()
+  const headers = {}
+  if (patientToken) {
+    headers["Authorization"] = `Bearer ${patientToken}`
+  }
+  return await apiFetch("/asha-calls/request", {
+    method: "POST",
+    headers,
+    body: { target_worker_id, reason },
+  })
+}
+
+/**
+ * Poll the authenticated patient's current pending or active audio call.
+ * Calls GET /api/asha-calls/active-patient
+ *
+ * @returns {Promise<Object|null>} AshaCallResponse or null
+ */
+export async function getPatientActiveAshaCall() {
+  const patientToken = getPatientAuthToken() || getAuthToken()
+  const headers = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    Pragma: "no-cache",
+  }
+  if (patientToken) {
+    headers["Authorization"] = `Bearer ${patientToken}`
+  }
+  return await apiFetch(`/asha-calls/active-patient?_t=${Date.now()}`, {
+    headers,
+    cache: "no-store",
+  })
+}
+
+/**
+ * Poll the authenticated ASHA worker's incoming or active audio call.
+ * Calls GET /api/asha-calls/active-asha
+ *
+ * @returns {Promise<Object|null>} AshaCallResponse or null
+ */
+export async function getAshaActiveCall() {
+  const ashaToken = getAshaAuthToken() || getAuthToken()
+  const headers = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    Pragma: "no-cache",
+  }
+  if (ashaToken) {
+    headers["Authorization"] = `Bearer ${ashaToken}`
+  }
+  return await apiFetch(`/asha-calls/active-asha?_t=${Date.now()}`, {
+    headers,
+    cache: "no-store",
+  })
+}
+
+/**
+ * ASHA worker accepts or declines an incoming audio call request.
+ * Calls POST /api/asha-calls/{call_id}/decision
+ *
+ * @param {string} callId
+ * @param {Object} decision - { action: "accept" | "reject", reason?: string }
+ * @returns {Promise<Object>} AshaCallResponse
+ */
+export async function decideAshaCall(callId, { action, reason = null }) {
+  const ashaToken = getAshaAuthToken() || getAuthToken()
+  const headers = {}
+  if (ashaToken) {
+    headers["Authorization"] = `Bearer ${ashaToken}`
+  }
+  return await apiFetch(`/asha-calls/${callId}/decision`, {
+    method: "POST",
+    headers,
+    body: { action, reason },
+  })
+}
+
+/**
+ * Initiating patient cancels an audio call before ASHA answers.
+ * Calls POST /api/asha-calls/{call_id}/cancel
+ *
+ * @param {string} callId
+ * @returns {Promise<Object>} AshaCallResponse
+ */
+export async function cancelAshaCall(callId) {
+  const patientToken = getPatientAuthToken() || getAuthToken()
+  const headers = {}
+  if (patientToken) {
+    headers["Authorization"] = `Bearer ${patientToken}`
+  }
+  return await apiFetch(`/asha-calls/${callId}/cancel`, {
+    method: "POST",
+    headers,
+  })
+}
+
+/**
+ * Either participant terminates an ongoing audio call.
+ * Calls POST /api/asha-calls/{call_id}/end
+ *
+ * @param {string} callId
+ * @param {boolean} [isAsha=false] - Whether caller is the ASHA worker
+ * @returns {Promise<Object>} AshaCallResponse
+ */
+export async function endAshaCall(callId, isAsha = false) {
+  const token = isAsha
+    ? (getAshaAuthToken() || getAuthToken())
+    : (getPatientAuthToken() || getAuthToken())
+  const headers = {}
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`
+  }
+  return await apiFetch(`/asha-calls/${callId}/end`, {
+    method: "POST",
+    headers,
+  })
+}
+
+/**
+ * Fetch status and session details of a specific audio call by ID.
+ * Calls GET /api/asha-calls/{call_id}
+ *
+ * @param {string} callId
+ * @param {boolean} [isAsha=false]
+ * @returns {Promise<Object>} AshaCallResponse
+ */
+export async function getAshaCallDetails(callId, isAsha = false) {
+  const token = isAsha
+    ? (getAshaAuthToken() || getAuthToken())
+    : (getPatientAuthToken() || getAuthToken())
+  const headers = {}
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`
+  }
+  return await apiFetch(`/asha-calls/${callId}`, {
+    headers,
   })
 }
 

@@ -515,3 +515,73 @@ async def mark_notification_read(notification_id: str, patient_id: str) -> bool:
         {"$set": {"is_read": True, "updated_at": datetime.now(timezone.utc)}},
     )
     return res.modified_count > 0
+
+
+async def get_asha_notifications(current_asha: dict) -> List[NotificationResponse]:
+    """
+    Retrieve all notifications belonging to the currently authenticated ASHA worker from MongoDB.
+    Strictly scoped to worker_id so notifications are not leaked between workers.
+    Sorted descending by created_at.
+    """
+    notifications_col = get_collection(COLLECTION_NOTIFICATIONS)
+    if notifications_col is None:
+        return []
+
+    worker_id = current_asha.get("worker_id") or str(current_asha.get("_id"))
+    cursor = notifications_col.find({
+        "recipient_role": "asha",
+        "$or": [
+            {"recipient_id": worker_id},
+            {"worker_id": worker_id},
+            {"asha_worker_id": worker_id},
+        ],
+    }).sort("created_at", -1)
+
+    results: List[NotificationResponse] = []
+    async for doc in cursor:
+        results.append(doc_to_notification_response(doc))
+    return results
+
+
+async def mark_asha_notification_read(notification_id: str, worker_id: str) -> bool:
+    """Mark an ASHA notification as read, scoped to the authenticated worker."""
+    notifications_col = get_collection(COLLECTION_NOTIFICATIONS)
+    if notifications_col is None:
+        return False
+
+    from bson import ObjectId
+    id_conditions = [{"notification_id": notification_id}]
+    if ObjectId.is_valid(notification_id):
+        id_conditions.append({"_id": ObjectId(notification_id)})
+
+    res = await notifications_col.update_one(
+        {
+            "$or": id_conditions,
+            "recipient_role": "asha",
+            "$or": [
+                {"recipient_id": worker_id},
+                {"worker_id": worker_id},
+                {"asha_worker_id": worker_id},
+            ],
+        },
+        {"$set": {"is_read": True, "updated_at": datetime.now(timezone.utc)}},
+    )
+    return res.modified_count > 0 or res.matched_count > 0
+
+
+async def mark_all_asha_notifications_read(worker_id: str) -> bool:
+    """Mark all notifications for this ASHA worker as read."""
+    notifications_col = get_collection(COLLECTION_NOTIFICATIONS)
+    if notifications_col is not None:
+        await notifications_col.update_many(
+            {
+                "recipient_role": "asha",
+                "$or": [
+                    {"recipient_id": worker_id},
+                    {"worker_id": worker_id},
+                    {"asha_worker_id": worker_id},
+                ],
+            },
+            {"$set": {"is_read": True, "updated_at": datetime.now(timezone.utc)}},
+        )
+    return True

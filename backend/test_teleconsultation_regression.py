@@ -107,6 +107,15 @@ async def run_regression_tests():
             print(f"[OK] Exactly 1 consultation created on explicit button click: {cons_id}")
 
             # ---------------------------------------------------------
+            # TEST 3B: Rejection of Unauthorized Roles (Doctor creating request)
+            # ---------------------------------------------------------
+            print("\n[TEST 3B] Testing rejection of unauthorized role (Doctor creating request)...")
+            res_doc_create = await client.post("/api/consultations/request", json=req_payload, headers=headers_doc)
+            assert res_doc_create.status_code == 403, f"Expected 403 Forbidden for doctor, got {res_doc_create.status_code}"
+            assert res_doc_create.json().get("detail") == "Only patients and ASHA workers can create consultation requests."
+            print("[OK] Doctor attempting to create consultation request correctly rejected with 403 Forbidden.")
+
+            # ---------------------------------------------------------
             # TEST 4: Repeating the same request / retry does NOT create duplicates
             # ---------------------------------------------------------
             print("\n[TEST 4] Testing duplicate request prevention on rapid button clicks / retries...")
