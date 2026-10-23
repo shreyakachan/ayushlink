@@ -37,6 +37,9 @@ async def run_badge_tests():
     test_sym_id = None
     created_notif_ids = []
 
+    if notifs_col is not None:
+        await notifs_col.delete_many({"patient_name": {"$in": ["Sunita Devi", "Meena Devi"]}})
+
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:

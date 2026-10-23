@@ -48,6 +48,7 @@ def doc_to_doctor_response(doc: dict) -> DoctorResponse:
         registration_number=doc.get("registration_number"),
         assigned_facility=doc.get("assigned_facility"),
         preferred_language=doc.get("preferred_language", "en"),
+        role="doctor",
         is_on_duty=doc.get("is_on_duty", True),
         stats=doc.get("stats", default_stats),
         created_at=doc.get("created_at"),

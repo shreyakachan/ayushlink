@@ -5,6 +5,7 @@ import {
   getPatientPrescriptions,
   submitDoctorConsultation,
   getDoctorAuthUser,
+  getDoctorAuthToken,
 } from "../lib/api.js"
 
 function formatDate(iso) {
@@ -219,8 +220,15 @@ export default function DoctorConsultationScreen({
   // Handle consultation submit
   const handleSubmitConsultation = async (e) => {
     if (e) e.preventDefault()
+    if (saving || saveSuccess) return
     setValidationError(null)
     setErrorMessage(null)
+
+    const docToken = getDoctorAuthToken()
+    if (!docToken) {
+      setErrorMessage("Access forbidden: Doctor credentials required. Please log in with a valid doctor account.")
+      return
+    }
 
     if (!diagnosis.trim() && !notes.trim()) {
       setValidationError("Please enter a Diagnosis or Doctor's Clinical Notes.")
@@ -233,10 +241,23 @@ export default function DoctorConsultationScreen({
       .map((m) => ({
         name: m.name.trim(),
         dosage: m.dosage ? m.dosage.trim() : "1 tablet",
-        frequency: m.frequency ? m.frequency.trim() : "Twice daily",
+        frequency: m.frequency ? m.frequency.trim() : "Twice daily after food",
         duration: m.duration ? m.duration.trim() : "3 days",
         instructions: m.instructions ? m.instructions.trim() : null,
       }))
+
+    // Validate medicine required fields
+    for (let i = 0; i < validMedicines.length; i++) {
+      const med = validMedicines[i]
+      if (!med.dosage || !med.dosage.trim()) {
+        setValidationError(`Medicine '${med.name}' requires a dosage (e.g. 1 tablet).`)
+        return
+      }
+      if (!med.duration || !med.duration.trim()) {
+        setValidationError(`Medicine '${med.name}' requires a duration (e.g. 3 days).`)
+        return
+      }
+    }
 
     const payload = {
       patient_id: patientId,
@@ -255,6 +276,11 @@ export default function DoctorConsultationScreen({
 
       // Update local history
       setConsultationsHistory((prev) => [res, ...prev])
+      if (res.prescription_id) {
+        getPatientPrescriptions(patientId).then((rxList) => {
+          if (Array.isArray(rxList)) setPatientPrescriptions(rxList)
+        }).catch(() => {})
+      }
 
       if (onConsultationComplete) {
         onConsultationComplete(res)
@@ -423,8 +449,14 @@ export default function DoctorConsultationScreen({
                   <h3 className="text-sm font-bold text-emerald-900">
                     Consultation #{saveSuccess.consultation_id} Recorded Successfully!
                   </h3>
-                  <p className="text-xs text-emerald-700">
-                    Diagnosis: <strong>{saveSuccess.diagnosis}</strong> • Prescribed: {saveSuccess.medicines?.length || 0} medicine(s)
+                  <p className="text-xs text-emerald-700 flex flex-wrap items-center gap-1.5 mt-0.5">
+                    <span>Diagnosis: <strong>{saveSuccess.diagnosis}</strong></span>
+                    <span>• Prescribed: {saveSuccess.medicines?.length || 0} medicine(s)</span>
+                    {saveSuccess.prescription_id && (
+                      <span className="font-semibold text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-md border border-emerald-300">
+                        Prescription ID: #{saveSuccess.prescription_id}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>

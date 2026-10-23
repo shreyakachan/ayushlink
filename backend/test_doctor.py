@@ -33,7 +33,7 @@ async def run_tests():
 
     for col in [doctors_col, patients_col, symptoms_col, asha_col, notifs_col]:
         if col is not None:
-            await col.delete_many({"phone": {"$in": [phone_doctor, phone_patient, phone_asha]}})
+            await col.delete_many({"phone": {"$in": [phone_doctor, phone_patient, phone_asha, "9823000001"]}})
 
     pid = None
     try:
@@ -46,7 +46,7 @@ async def run_tests():
             print("\n[TEST 1] Testing Doctor Registration API (POST /api/doctor/register)...")
             reg_payload = {
                 "full_name": "Dr. Anjali Rao",
-                "phone": "+91 98230 00001",
+                "phone": f"+91 {phone_doctor}",
                 "password": "DoctorSecurePass123",
                 "email": "dr.anjali@ayushlink.in",
                 "specialization": "General Physician",
@@ -91,7 +91,7 @@ async def run_tests():
             # ---------------------------------------------------------
             print("\n[TEST 2] Testing Doctor Login API (POST /api/doctor/login)...")
             login_payload = {
-                "phone": "9823000001",
+                "phone": phone_doctor,
                 "password": "DoctorSecurePass123",
             }
             res_login = await client.post("/api/doctor/login", json=login_payload)
@@ -102,7 +102,7 @@ async def run_tests():
             print(f"[OK] Doctor login successful! Token received for {login_data['doctor']['full_name']}")
 
             # Wrong password rejection
-            res_wrong = await client.post("/api/doctor/login", json={"phone": "9823000001", "password": "WrongPassword"})
+            res_wrong = await client.post("/api/doctor/login", json={"phone": phone_doctor, "password": "WrongPassword"})
             assert res_wrong.status_code == 401
             print(f"[OK] Wrong password rejected with 401")
 

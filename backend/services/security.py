@@ -2,6 +2,7 @@ import bcrypt
 import jwt
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
+from bson import ObjectId
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from config import settings
@@ -102,6 +103,8 @@ async def get_current_patient(
         queries.append({"phone": phone})
     if sub:
         queries.append({"patient_id": sub})
+        if ObjectId.is_valid(sub):
+            queries.append({"_id": ObjectId(sub)})
     if not queries:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -140,6 +143,8 @@ async def get_current_asha_worker(
         queries.append({"phone": phone})
     if sub:
         queries.append({"worker_id": sub})
+        if ObjectId.is_valid(sub):
+            queries.append({"_id": ObjectId(sub)})
     if not queries:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -178,6 +183,8 @@ async def get_current_doctor(
         queries.append({"phone": phone})
     if sub:
         queries.append({"doctor_id": sub})
+        if ObjectId.is_valid(sub):
+            queries.append({"_id": ObjectId(sub)})
     if not queries:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

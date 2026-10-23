@@ -103,13 +103,6 @@ export default function PatientHealthRecordScreen({ record: initialRecord, lang 
     let isMounted = true
 
     async function loadRecord() {
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        if (isMounted) {
-          setLoading(false)
-          setHasLoaded(true)
-        }
-        return
-      }
       try {
         setLoading(true)
         const data = await getPatientMedicalRecord()

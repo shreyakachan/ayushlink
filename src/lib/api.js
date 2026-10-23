@@ -447,7 +447,22 @@ export function getOfflineCachedSession(role, phoneOrId) {
  */
 export async function apiFetch(endpoint, options = {}) {
   const url = endpoint.startsWith("http") ? endpoint : `${API_BASE_URL}${endpoint}`
-  const token = getAuthToken()
+  let token = null
+  if (options.headers?.Authorization) {
+    // caller explicitly supplied Authorization
+  } else {
+    const role = getAuthRole()
+    const cleanEndpoint = endpoint.toLowerCase()
+    if (cleanEndpoint.includes("/doctor") || role === "doctor") {
+      token = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+    } else if (cleanEndpoint.includes("/asha") || role === "asha") {
+      token = getAshaAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "asha" ? getAuthToken() : null)
+    } else if (cleanEndpoint.includes("/patient") || role === "patient") {
+      token = getPatientAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "patient" ? getAuthToken() : null)
+    } else {
+      token = getAuthToken()
+    }
+  }
 
   const headers = {
     "Content-Type": "application/json",
@@ -733,7 +748,9 @@ export async function getPatientMedicalRecord(patientId = null) {
     return await apiFetch(`/asha/patients/${patientId}/records`, { headers })
   }
   if (role === "doctor" && patientId) {
-    return await apiFetch(`/doctor/patients/${patientId}/records`)
+    const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+    const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
+    return await apiFetch(`/doctor/patients/${patientId}/records`, { headers })
   }
   const patientToken = getPatientAuthToken() || getAuthToken()
   const headers = {}
@@ -899,14 +916,19 @@ export async function getMchCases() {
     const headers = ashaToken ? { Authorization: `Bearer ${ashaToken}` } : {}
     return await apiFetch("/doctor/mch-cases", { headers })
   }
-  return await apiFetch("/doctor/mch-cases")
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
+  return await apiFetch("/doctor/mch-cases", { headers })
 }
 
 export const getDoctorMchCases = getMchCases
 
 export async function assignDoctorCase(patientId) {
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
   return await apiFetch(`/doctor/cases/${patientId}/assign`, {
     method: "POST",
+    headers,
   })
 }
 
@@ -915,7 +937,9 @@ export async function getAshaWorkersList() {
   if (role === "patient") {
     return await getAshaCallWorkersList()
   }
-  return await apiFetch("/doctor/asha-workers")
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
+  return await apiFetch("/doctor/asha-workers", { headers })
 }
 
 
@@ -932,10 +956,14 @@ export async function getPatientPrescriptions(patientId = null) {
     return await apiFetch(`/asha/patients/${patientId}/prescriptions`, { headers })
   }
   if (role === "doctor" && patientId) {
-    return await apiFetch(`/doctor/patients/${patientId}/prescriptions`)
+    const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+    const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
+    return await apiFetch(`/doctor/patients/${patientId}/prescriptions`, { headers })
   }
   if (role === "doctor") {
-    return await apiFetch("/doctor/prescriptions")
+    const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+    const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
+    return await apiFetch("/doctor/prescriptions", { headers })
   }
   const patientToken = getPatientAuthToken() || getAuthToken()
   const headers = patientToken ? { Authorization: `Bearer ${patientToken}` } : {}
@@ -943,9 +971,12 @@ export async function getPatientPrescriptions(patientId = null) {
 }
 
 export async function createDoctorPrescription(prescriptionData) {
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
   return await apiFetch("/doctor/prescriptions", {
     method: "POST",
     body: prescriptionData,
+    headers,
   })
 }
 
@@ -979,14 +1010,19 @@ export async function requestConsultation(consultationData, options = {}) {
 }
 
 export async function submitDoctorConsultation(consultationData) {
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
   return await apiFetch("/doctor/consultations", {
     method: "POST",
     body: consultationData,
+    headers,
   })
 }
 
 export async function getPatientConsultations(patientId) {
-  return await apiFetch(`/doctor/patients/${patientId}/consultations`)
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
+  return await apiFetch(`/doctor/patients/${patientId}/consultations`, { headers })
 }
 
 export async function decideConsultation(consultationId, action, notes = null) {
@@ -1145,14 +1181,20 @@ export async function markAllAshaNotificationsRead() {
 }
 
 export async function markDoctorNotificationRead(notificationId) {
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
   return await apiFetch(`/doctor/notifications/${notificationId}/read`, {
     method: "PATCH",
+    headers,
   })
 }
 
 export async function markAllDoctorNotificationsRead() {
+  const docToken = getDoctorAuthToken() || (checkTokenExpiry(getAuthToken()).payload?.role === "doctor" ? getAuthToken() : null)
+  const headers = docToken ? { Authorization: `Bearer ${docToken}` } : {}
   return await apiFetch("/doctor/notifications/read-all", {
     method: "PATCH",
+    headers,
   })
 }
 

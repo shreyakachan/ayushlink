@@ -82,8 +82,11 @@ async def create_prescription(
         )
 
     # Generate unique Prescription ID e.g. RX-1042
-    rx_num = random.randint(1000, 9999)
-    prescription_id = f"RX-{rx_num}"
+    while True:
+        rx_num = random.randint(1000, 9999)
+        prescription_id = f"RX-{rx_num}"
+        if not await prescriptions_col.find_one({"prescription_id": prescription_id}):
+            break
 
     now = datetime.now(timezone.utc)
     target_pid = patient_doc.get("patient_id") or str(patient_doc["_id"])
@@ -105,6 +108,7 @@ async def create_prescription(
         "instructions": instructions_val,
         "advice": advice_val,
         "notes": notes_val,
+        "consultation_id": data.consultation_id,
         "date": now,
         "status": data.status or "active",
         "facility": current_doctor.get("assigned_facility"),
@@ -223,7 +227,10 @@ async def get_patient_prescriptions_for_doctor(
     """Retrieve all prescriptions for a specific patient for an authenticated doctor."""
     patient_doc = await find_patient_by_id_or_pid(patient_identifier)
     if not patient_doc:
-        return []
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Patient '{patient_identifier}' not found.",
+        )
 
     prescriptions_col = get_collection(COLLECTION_PRESCRIPTIONS)
     if prescriptions_col is None:

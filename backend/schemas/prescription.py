@@ -20,6 +20,7 @@ class PrescriptionCreateRequest(BaseModel):
     instructions: Optional[str] = Field(default=None, max_length=2000, description="General doctor advice/diet instructions")
     advice: Optional[str] = Field(default=None, max_length=2000, description="Doctor's Advice & Dietary Guidelines")
     notes: Optional[str] = Field(default=None, max_length=2000, description="Additional notes")
+    consultation_id: Optional[str] = Field(default=None, description="Linked consultation ID")
     status: str = Field(default="active", description="active | completed | requested")
 
 

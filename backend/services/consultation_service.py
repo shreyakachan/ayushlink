@@ -53,6 +53,7 @@ def doc_to_consultation_response(doc: dict) -> ConsultationResponse:
         medicines=clean_medicines,
         requested_by=doc.get("requested_by", "patient"),
         call_session=doc.get("call_session", {"room_id": None, "session_status": "idle"}),
+        prescription_id=doc.get("prescription_id"),
         offline_id=doc.get("offline_id"),
         created_at=doc.get("created_at"),
         updated_at=doc.get("updated_at"),
@@ -137,8 +138,11 @@ async def create_consultation_request(
             if doc_record:
                 doctor_name = doc_record.get("full_name")
 
-    cons_num = random.randint(1000, 9999)
-    consultation_id = f"CONS-{cons_num}"
+    while True:
+        cons_num = random.randint(1000, 9999)
+        consultation_id = f"CONS-{cons_num}"
+        if not await consultations_col.find_one({"consultation_id": consultation_id}):
+            break
     now = datetime.now(timezone.utc)
 
     # Video-call ready data structure
@@ -321,6 +325,14 @@ async def submit_doctor_consultation(
             detail=f"Patient '{data.patient_id}' not found.",
         )
 
+    has_diag = bool(data.diagnosis and data.diagnosis.strip())
+    has_notes = bool(data.notes and data.notes.strip())
+    if not has_diag and not has_notes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either clinical diagnosis or doctor clinical notes is required to complete a consultation.",
+        )
+
     target_pid = patient_doc.get("patient_id") or str(patient_doc.get("_id"))
     doc_id = current_doctor.get("doctor_id", str(current_doctor.get("_id", "DOC-101")))
     doc_name = current_doctor.get("full_name") or "Doctor"
@@ -360,7 +372,10 @@ async def submit_doctor_consultation(
             consultation_id = existing_cons.get("consultation_id")
 
     if not consultation_id:
-        consultation_id = f"CONS-{random.randint(1000, 9999)}"
+        while True:
+            consultation_id = f"CONS-{random.randint(1000, 9999)}"
+            if not await consultations_col.find_one({"consultation_id": consultation_id}):
+                break
 
     # Determine symptoms
     patient_symptoms = [patient_doc.get("condition")] if patient_doc.get("condition") else []
@@ -404,41 +419,68 @@ async def submit_doctor_consultation(
         ins_res = await consultations_col.insert_one(cons_doc)
         cons_doc["_id"] = ins_res.inserted_id
 
-    # If medicines, advice, or notes are provided, create digital prescription record
+    # If medicines, advice, or notes are provided, create or update digital prescription record
+    rx_id = None
     if (medicines_dicts or data.advice or data.notes) and prescriptions_col is not None:
-        rx_id = f"RX-{random.randint(1000, 9999)}"
-        rx_doc = {
-            "prescription_id": rx_id,
-            "patient_id": target_pid,
-            "patient_name": patient_doc.get("full_name"),
-            "patient_village": patient_doc.get("village"),
-            "doctor_id": doc_id,
-            "doctor_name": doc_name,
-            "diagnosis": data.diagnosis,
-            "medicines": medicines_dicts,
-            "advice": data.advice,
-            "instructions": data.advice or data.notes,
-            "notes": data.notes,
-            "date": cons_time,
-            "status": "active",
-            "consultation_id": consultation_id,
-            "created_at": now,
-            "updated_at": now,
-        }
-        await prescriptions_col.insert_one(rx_doc)
+        # Check if prescription already exists for this consultation (idempotency on retry)
+        existing_rx = await prescriptions_col.find_one({"consultation_id": consultation_id})
+        if existing_rx:
+            rx_id = existing_rx.get("prescription_id")
+            update_fields = {
+                "diagnosis": data.diagnosis or patient_doc.get("condition"),
+                "medicines": medicines_dicts,
+                "advice": data.advice,
+                "instructions": data.advice or data.notes,
+                "notes": data.notes,
+                "status": "active",
+                "updated_at": now,
+            }
+            await prescriptions_col.update_one({"_id": existing_rx["_id"]}, {"$set": update_fields})
+        else:
+            while True:
+                candidate_rx = f"RX-{random.randint(1000, 9999)}"
+                if not await prescriptions_col.find_one({"prescription_id": candidate_rx}):
+                    rx_id = candidate_rx
+                    break
 
-        # Trigger in-app notification for patient
-        try:
-            from services.notification_service import create_prescription_notification
-            await create_prescription_notification(
-                patient_id=target_pid,
-                doctor_name=doc_name,
-                prescription_id=rx_id,
-                consultation_id=consultation_id,
-                doctor_id=doc_id,
-            )
-        except Exception as e:
-            pass
+            rx_doc = {
+                "prescription_id": rx_id,
+                "patient_id": target_pid,
+                "patient_name": patient_doc.get("full_name"),
+                "patient_village": patient_doc.get("village"),
+                "doctor_id": doc_id,
+                "doctor_name": doc_name,
+                "diagnosis": data.diagnosis or patient_doc.get("condition"),
+                "medicines": medicines_dicts,
+                "advice": data.advice,
+                "instructions": data.advice or data.notes,
+                "notes": data.notes,
+                "date": cons_time,
+                "status": "active",
+                "consultation_id": consultation_id,
+                "created_at": now,
+                "updated_at": now,
+            }
+            await prescriptions_col.insert_one(rx_doc)
+
+            # Trigger in-app notification for patient
+            try:
+                from services.notification_service import create_prescription_notification
+                await create_prescription_notification(
+                    patient_id=target_pid,
+                    doctor_name=doc_name,
+                    prescription_id=rx_id,
+                    consultation_id=consultation_id,
+                    doctor_id=doc_id,
+                )
+            except Exception:
+                pass
+
+        cons_doc["prescription_id"] = rx_id
+        await consultations_col.update_one(
+            {"_id": cons_doc["_id"]},
+            {"$set": {"prescription_id": rx_id}},
+        )
 
     # Update doctor statistics
     if doctors_col is not None and doc_id:
@@ -450,7 +492,7 @@ async def submit_doctor_consultation(
             {"$inc": inc_fields},
         )
 
-    # Update patient status
+    # Update patient status & push to medical history
     if patients_col is not None:
         patient_update = {
             "assigned_doctor_id": doc_id,
@@ -459,9 +501,24 @@ async def submit_doctor_consultation(
         }
         if data.diagnosis:
             patient_update["condition"] = data.diagnosis
+
+        update_op = {"$set": patient_update}
+        formatted_date = cons_time.strftime("%d %b %Y") if hasattr(cons_time, "strftime") else str(cons_time)[:10]
+        history_entry = {
+            "id": rx_id or consultation_id,
+            "date": formatted_date,
+            "reason": data.diagnosis or "Doctor Consultation",
+            "diagnosis": data.diagnosis,
+            "doctor": doc_name,
+            "consultation_id": consultation_id,
+        }
+        if rx_id:
+            history_entry["prescription_id"] = rx_id
+        update_op["$push"] = {"medical_history": history_entry}
+
         await patients_col.update_one(
             {"_id": patient_doc["_id"]},
-            {"$set": patient_update},
+            update_op,
         )
 
     return doc_to_consultation_response(cons_doc)

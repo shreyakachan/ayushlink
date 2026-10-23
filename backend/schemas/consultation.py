@@ -61,6 +61,7 @@ class ConsultationResponse(BaseModel):
     medicines: List[MedicineItemSchema] = []
     requested_by: Optional[str] = "patient"
     call_session: Dict[str, Any] = Field(default_factory=dict)
+    prescription_id: Optional[str] = None
     offline_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

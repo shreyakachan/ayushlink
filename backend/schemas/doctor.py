@@ -58,6 +58,7 @@ class DoctorResponse(BaseModel):
     registration_number: Optional[str] = None
     assigned_facility: Optional[str] = None
     preferred_language: str = "en"
+    role: str = "doctor"
     is_on_duty: bool = True
     stats: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
